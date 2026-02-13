@@ -1,5 +1,5 @@
 # Use official uv image for the binary
-FROM astral-sh/uv:latest AS uv_bin
+FROM ghcr.io/astral-sh/uv:latest AS uv_bin
 
 # Use Python 3.11 slim image
 FROM python:3.11-slim
