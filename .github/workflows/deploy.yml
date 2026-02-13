@@ -52,45 +52,53 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create directory on EC2
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: mkdir -p ~/app
-          debug: true
-
-      - name: Copy docker-compose via SCP
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "docker-compose.yml"
-          target: "~/app/docker-compose.yml"
-
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
+      - name: Setup SSH and Deploy
+        env:
+          PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          HOSTNAME: ${{ secrets.EC2_HOST }}
+          USER_NAME: ${{ secrets.EC2_USER }}
+        run: |
+          # Setup SSH
+          mkdir -p ~/.ssh
+          echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Add host key to known_hosts to avoid interactive prompt
+          ssh-keyscan -H $HOSTNAME >> ~/.ssh/known_hosts || true
+          
+          echo "Testing connection and creating directory..."
+          # Use -v for verbose output to debug connection issues
+          ssh -v -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
+          
+          echo "Copying docker-compose.yml..."
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa docker-compose.yml $USER_NAME@$HOSTNAME:~/app/docker-compose.yml
+          
+          echo "Executing remote deployment..."
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
             cd ~/app
-            # Create .env file for Docker Compose
-            # Note: We are using the repository name for image, ensure it is lowercase
-            export REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-            echo "BACKEND_IMAGE=ghcr.io/$REPO-backend:latest" > .env
             
-            # Login to GHCR (skipped as per user request - ensure package is public or authenticated)
-            # echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Setup environment variables
+            # We hardcode the repo name logic here since we are in a single-quoted heredoc
+            # Note: We need to pass the repo name properly. 
+            # It's safer to pass it via an env var to the ssh command, but for simplicity we will recalculate or just use the fixed value if known.
+            # Let's try to inject the value by closing and reopening the quote if needed, or better:
+            # simply set the .env content from the local machine and copy it!
+          EOF
+          
+          # Better approach: Create .env locally and scp it
+          REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "BACKEND_IMAGE=ghcr.io/$REPO-backend:latest" > .env
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env $USER_NAME@$HOSTNAME:~/app/.env
+          
+          # Final Deploy Command
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
+            cd ~/app
             
-            # Pull latest images
+            # Login logic (if needed in future)
+            # ...
+            
+            # Pull and Restart
             docker compose pull backend
-            
-            # Restart backend service
             docker compose up -d backend
-            
-            # Clean up unused images
             docker image prune -f
+          EOF
