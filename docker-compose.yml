@@ -17,7 +17,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   backend:
-    image: crypto-backend:latest
+    image: ${BACKEND_IMAGE:-crypto-backend:latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -33,18 +33,18 @@ services:
     ports:
       - "8000:8000"
 
-  frontend:
-    image: crypto-frontend:latest
-    build:
-      context: ./apps/frontend
-      dockerfile: Dockerfile
-    container_name: crypto-frontend
-    depends_on:
-      - backend
-    environment:
-      - VITE_API_BASE_URL=http://localhost:8000
-    ports:
-      - "8080:80"
+#   frontend:
+#     image: crypto-frontend:latest
+#     build:
+#       context: ./apps/frontend
+#       dockerfile: Dockerfile
+#     container_name: crypto-frontend
+#     depends_on:
+#       - backend
+#     environment:
+#       - VITE_API_BASE_URL=http://localhost:8000
+#     ports:
+#       - "8080:80"
 
 volumes:
   postgres_data:
