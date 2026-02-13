@@ -1,0 +1,20 @@
+markdownExploder: true
+prd:
+  prdFile: docs/prd/index.md
+  prdVersion: v4
+  prdSharded: true
+  prdShardedLocation: docs/prd
+  epicFilePattern: docs/epics/epic-{n}*.md
+architecture:
+  architectureFile: docs/fullstack-architecture.md
+  architectureVersion: v4
+  architectureSharded: true
+  architectureShardedLocation: docs/fullstack-architecture
+customTechnicalDocuments: null
+devLoadAlwaysFiles:
+  - docs/fullstack-architecture/coding-standards.md
+  - docs/fullstack-architecture/tech-stack.md
+  - docs/fullstack-architecture/source-tree.md
+devDebugLog: .ai/debug-log.md
+devStoryLocation: docs/stories
+slashPrefix: BMad

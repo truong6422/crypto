@@ -1,0 +1,451 @@
+# Cursor Rules for Python FastAPI Project
+
+## Overview
+
+This project follows best practices for FastAPI with domain-driven architecture, API versioning, audit fields, internationalization, and comprehensive logging system. All code must comply with the following rules.
+
+## 1. Project Structure
+
+### Domain-Driven Structure
+- Each module represents a business domain
+- Clear separation between router, service, models, schemas, dependencies
+- Use standard directory structure for each module
+
+```
+src/
+├── api/v1/           # API endpoints with version prefix
+├── auth/             # Authentication & authorization
+├── core/             # Core configurations
+├── models/           # Database models
+├── schemas/          # Pydantic schemas
+├── services/         # Business logic services
+├── utils/            # Utility functions
+└── logging/          # Logging system
+```
+
+### API Versioning
+- **Required**: All API endpoints must have version prefix `/api/v1/`
+- Support backward compatibility for multiple versions
+- Use URL path versioning strategy
+
+## 2. Code Style & Naming Conventions
+
+### Python Code Style
+- **Indentation**: 4 spaces (no tabs)
+- **Max line length**: 120 characters
+- **Blank lines**: 2 between classes/functions, 1 between methods
+- **Imports**: Standard → Third party → Local, each import on separate line
+- **Comments**: Wrap at 72 characters, use English with proper grammar
+
+### Naming Conventions
+- **Packages/Modules**: lowercase with underscore (`user_management`)
+- **Classes**: PascalCase (`UserService`, `DatabaseConnection`)
+- **Functions/Variables**: snake_case (`get_user_by_id`, `user_name`)
+- **Constants**: UPPERCASE with underscore (`MAX_RETRY_ATTEMPTS`)
+- **Private members**: single underscore prefix (`_private_method`)
+
+### Flake8 Configuration
+```ini
+max-line-length = 120
+select = C,E,F,W,DJ,DJ10
+exclude = .git,.env,venv,.venv,*/alembic/*
+```
+
+## 3. Database Models & Audit Fields
+
+### Base Model with Audit Fields
+```python
+class BaseModel(Base, AuditMixin):
+    __abstract__ = True
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+```
+
+### Audit Fields (Auto-updated)
+- `created_by`: User ID who created the record
+- `updated_by`: User ID who updated the record
+- `deleted_by`: User ID who deleted the record
+- `created_at`: Creation timestamp
+- `updated_at`: Update timestamp
+- `deleted_at`: Deletion timestamp
+- `is_deleted`: Soft delete flag
+
+### SQLAlchemy Events
+- `before_insert`: Set created_by, created_at
+- `before_update`: Set updated_by, updated_at
+- `before_delete`: Set deleted_by, deleted_at, is_deleted
+- `after_insert/update/delete`: Log audit events
+
+## 4. UUID Best Practices
+
+### UUID Implementation
+- **Use uuid-utils with uuidv8** for all UUID fields
+- Time-ordered UUIDs for database performance
+- UUID format validation in schemas
+- Explicit UUID generation in services
+
+```python
+from src.utils.uuid_utils import generate_uuid, is_valid_uuid
+
+def generate_uuid() -> str:
+    return str(uuid8())
+
+def is_valid_uuid(uuid_string: str) -> bool:
+    try:
+        uuid8(uuid_string)
+        return True
+    except ValueError:
+        return False
+```
+
+## 5. API Structure & Documentation
+
+### API Endpoints
+- **Version prefix**: `/api/v1/` for all endpoints
+- **Domain organization**: Each business domain has its own router
+- **Flexible authentication**: Each endpoint can have different auth requirements
+- **Complete documentation**: Each endpoint must have summary, description, responses
+
+### Authentication Levels
+- **Public endpoints**: No authentication required
+- **Authenticated endpoints**: Login required
+- **Admin endpoints**: Admin role required
+
+### Response Documentation
+```python
+@router.post(
+    "/",
+    response_model=PostResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create new post",
+    description="Create a new post - requires authentication (API v1)",
+    responses={
+        status.HTTP_201_CREATED: {"description": "Post created successfully"},
+        status.HTTP_400_BAD_REQUEST: {"description": "Invalid data"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"},
+        status.HTTP_403_FORBIDDEN: {"description": "Access denied"}
+    }
+)
+```
+
+## 6. Pydantic Schemas
+
+### Schema Validation
+- Use Pydantic for request/response validation
+- UUID validation in schemas
+- Field validation with min/max length, patterns
+- Custom validators for business logic
+
+### Base Schema
+```python
+class BaseSchema(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+        str_strip_whitespace=True,
+        validate_assignment=True
+    )
+
+class AuditSchema(BaseSchema):
+    created_by: str
+    updated_by: Optional[str] = None
+    deleted_by: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
+    is_deleted: bool = False
+```
+
+## 7. Business Logic Services
+
+### Service Pattern
+- Separate business logic from API endpoints
+- Dependency injection for database sessions
+- UUID validation in services
+- Comprehensive error handling
+
+### Service Structure
+```python
+class PostService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+    
+    def _validate_uuid(self, uuid_string: str, field_name: str = "ID"):
+        if not is_valid_uuid(uuid_string):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid {field_name} format"
+            )
+    
+    async def create_post(self, post_data: PostCreate, user_id: str) -> Post:
+        # Implementation with audit fields
+        pass
+```
+
+## 8. Internationalization (i18n)
+
+### Message Constants
+- All messages must use constants
+- Support gettext for translations
+- Locales folder for each app
+- Message keys for internationalization
+
+### Translation Setup
+```python
+# src/constants.py
+MESSAGES = {
+    "POST_CREATED": "post_created",
+    "POST_UPDATED": "post_updated",
+    "POST_DELETED": "post_deleted",
+    "POST_NOT_FOUND": "post_not_found",
+    "ACCESS_DENIED": "access_denied",
+    "ADMIN_REQUIRED": "admin_required",
+}
+```
+
+### Locale API
+- Endpoints for locale management
+- Support for vi, en, fr
+- Locale switching functionality
+- Translation file management
+
+## 9. Logging System
+
+### Structured Logging
+- JSON format logs with context
+- Elasticsearch integration
+- Request tracking with performance metrics
+- Error monitoring and analysis
+
+### Logging Configuration
+```python
+# Elasticsearch handler
+class ElasticsearchHandler(logging.Handler):
+    def emit(self, record):
+        # Structured logging with context
+        log_doc = {
+            "@timestamp": datetime.utcnow().isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            # Request context, exception info, extra fields
+        }
+```
+
+### Request Logging Middleware
+- Track all requests
+- Performance metrics (response time)
+- User context and authentication events
+- Error logging with stack traces
+
+## 10. Testing Requirements
+
+### Test Coverage
+- **API Tests**: All endpoints must have tests
+- **Unit Tests**: All models must have unit tests
+- **Integration Tests**: Service layer tests
+- **UUID Validation Tests**: Test UUID format validation
+
+### Test Structure
+```python
+@pytest.mark.asyncio
+async def test_create_post(client: AsyncClient, auth_headers):
+    """Test creating new post"""
+    post_data = PostCreate(
+        title="Test Post",
+        content="Test content"
+    )
+    
+    response = await client.post(
+        "/api/v1/posts/",
+        json=post_data.model_dump(),
+        headers=auth_headers
+    )
+    
+    assert response.status_code == 201
+    data = response.json()
+    assert is_valid_uuid(data["id"])
+```
+
+## 11. Environment Configuration
+
+### Type-safe Configuration
+```python
+class Settings(BaseSettings):
+    DATABASE_URL: str
+    SECRET_KEY: str
+    ELASTICSEARCH_URL: str
+    DEFAULT_LOCALE: str = "vi"
+    SUPPORTED_LOCALES: List[str] = ["vi", "en", "fr"]
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+```
+
+### Environment Files
+- `.env.development`: Development settings
+- `.env.test`: Test settings
+- `.env.production`: Production settings
+
+## 12. Security Requirements
+
+### Authentication & Authorization
+- JWT token authentication
+- Role-based access control
+- Admin role verification
+- Secure password hashing
+
+### Input Validation
+- UUID format validation
+- SQL injection prevention
+- XSS protection
+- Rate limiting
+
+## 13. Performance & Scalability
+
+### Async/Await
+- Use async/await for all database operations
+- Async session management
+- Non-blocking I/O operations
+
+### Database Optimization
+- Proper indexing for UUID fields
+- Query optimization
+- Connection pooling
+- Soft delete implementation
+
+## 14. Monitoring & Observability
+
+### Health Checks
+- Application health endpoints
+- Database connectivity checks
+- Elasticsearch health monitoring
+- Logging system health
+
+### Metrics & Monitoring
+- Request/response metrics
+- Error rate monitoring
+- Performance metrics
+- User activity tracking
+
+## 15. Deployment & DevOps
+
+### Docker Configuration
+- Multi-stage builds
+- Environment-specific configurations
+- Health check endpoints
+- Logging volume mounts
+
+### CI/CD Pipeline
+- Automated testing
+- Code quality checks (flake8)
+- Security scanning
+- Automated deployment
+
+## 16. Code Quality Tools
+
+### Linting & Formatting
+- **Flake8**: Code style checking
+- **PyCharm**: Auto-formatting and import optimization
+- **Pre-commit hooks**: Automated checks
+- **Black**: Code formatting (alternative)
+
+### Quality Gates
+- Max line length: 120 characters
+- Import organization: Standard → Third party → Local
+- Naming conventions compliance
+- Test coverage requirements
+
+## 17. Documentation Standards
+
+### API Documentation
+- OpenAPI/Swagger documentation
+- Authentication requirements
+- Request/response examples
+- Error codes and messages
+
+### Code Documentation
+- Docstrings for all classes and methods
+- Type hints for all functions
+- README files for each module
+- Architecture documentation
+
+## 18. Error Handling
+
+### Exception Strategy
+- Custom exceptions for business logic
+- Global exception handlers
+- Structured error responses
+- Comprehensive error logging
+
+### Error Response Format
+```python
+{
+    "detail": "Error message",
+    "error_code": "ERROR_001",
+    "timestamp": "2024-01-01T12:00:00Z",
+    "request_id": "uuid-string"
+}
+```
+
+## 19. Compliance Checklist
+
+### Architecture Compliance
+- ✅ API versioning with `/api/v1/` prefix
+- ✅ Domain-driven API structure
+- ✅ Audit fields auto-updated
+- ✅ UUID v8 implementation
+- ✅ Internationalization support
+- ✅ Structured logging with Elasticsearch
+- ✅ Complete API documentation
+- ✅ Comprehensive testing
+
+### Code Quality Compliance
+- ✅ 4-space indentation
+- ✅ 120 character line limit
+- ✅ Proper import organization
+- ✅ Naming conventions
+- ✅ Type hints
+- ✅ Docstrings
+- ✅ Error handling
+
+### Security Compliance
+- ✅ Authentication & authorization
+- ✅ Input validation
+- ✅ UUID validation
+- ✅ SQL injection prevention
+- ✅ XSS protection
+
+## 20. Development Workflow
+
+### Git Workflow
+- Feature branches from main
+- Pull request reviews
+- Automated testing
+- Code quality checks
+
+### Code Review Checklist
+- [ ] Follow naming conventions
+- [ ] Have API documentation
+- [ ] Have tests for endpoints
+- [ ] UUID validation implemented
+- [ ] Audit fields properly handled
+- [ ] Error handling comprehensive
+- [ ] Logging implemented
+- [ ] Type hints complete
+
+## Conclusion
+
+Following these rules ensures:
+- **Code Quality**: Consistent, maintainable code
+- **Architecture Compliance**: Domain-driven design with best practices
+- **Security**: Robust authentication and validation
+- **Performance**: Optimized database and async operations
+- **Monitoring**: Comprehensive logging and observability
+- **Scalability**: Modular design for easy scaling
+- **Developer Experience**: Clear structure and documentation
+
+Use automation tools (flake8, pre-commit, CI/CD) to ensure compliance with all these rules.
+description:
+globs:
+alwaysApply: false
+---

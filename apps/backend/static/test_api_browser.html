@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test API Categories</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .success { border-color: #4CAF50; background-color: #f1f8e9; }
+        .error { border-color: #f44336; background-color: #ffebee; }
+        .info { border-color: #2196F3; background-color: #e3f2fd; }
+        
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background-color: #45a049; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .result {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .login-form {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            align-items: end;
+        }
+        
+        .token-display {
+            word-break: break-all;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test API Categories</h1>
+    
+    <!-- Section 1: Public API Test -->
+    <div class="container">
+        <h2>📋 Test API Public (Không cần đăng nhập)</h2>
+        <div class="section info">
+            <p>Endpoint này không yêu cầu authentication và có thể truy cập trực tiếp từ trình duyệt.</p>
+            <button onclick="testPublicAPI()">Test Public API</button>
+            <div id="publicResult" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Section 2: Login -->
+    <div class="container">
+        <h2>🔐 Đăng Nhập</h2>
+        <div class="section">
+            <div class="login-form">
+                <div>
+                    <label>Username:</label>
+                    <input type="text" id="username" value="admin" placeholder="admin">
+                </div>
+                <div>
+                    <label>Password:</label>
+                    <input type="password" id="password" value="123456" placeholder="123456">
+                </div>
+                <div>
+                    <button onclick="login()">Đăng Nhập</button>
+                    <button onclick="logout()">Đăng Xuất</button>
+                </div>
+            </div>
+            <div id="tokenDisplay" class="token-display" style="display: none;"></div>
+            <div id="loginResult" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Section 3: Protected API Test -->
+    <div class="container">
+        <h2>🔒 Test API Protected (Cần đăng nhập)</h2>
+        <div class="section">
+            <p>Endpoint này yêu cầu authentication. Bạn cần đăng nhập trước.</p>
+            <button onclick="testProtectedAPI()" id="testProtectedBtn" disabled>Test Protected API</button>
+            <div id="protectedResult" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Section 4: API Info -->
+    <div class="container">
+        <h2>📚 Thông Tin API</h2>
+        <div class="section info">
+            <h3>Endpoints:</h3>
+            <ul>
+                <li><strong>Public:</strong> <code>GET /api/v1/categories/public/</code> - Không cần authentication</li>
+                <li><strong>Protected:</strong> <code>GET /api/v1/categories/</code> - Cần Bearer token</li>
+                <li><strong>Login:</strong> <code>POST /api/v1/auth/login</code> - Đăng nhập lấy token</li>
+            </ul>
+            
+            <h3>Tài khoản demo:</h3>
+            <ul>
+                <li><strong>admin</strong> / 123456 (Quyền đầy đủ)</li>
+                <li><strong>doctor</strong> / 123456 (Quyền đọc)</li>
+                <li><strong>nurse</strong> / 123456 (Quyền đọc)</li>
+                <li><strong>staff</strong> / 123456 (Quyền đọc)</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let currentToken = null;
+
+        // Test Public API
+        async function testPublicAPI() {
+            const resultDiv = document.getElementById('publicResult');
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Đang test...';
+            
+            try {
+                const response = await fetch('/api/v1/categories/public/?page=1&size=20');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `✅ Thành công!\nStatus: ${response.status}\nTổng số categories: ${data.total}\nSố items: ${data.items.length}\n\nDữ liệu:\n${JSON.stringify(data, null, 2)}`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `❌ Lỗi!\nStatus: ${response.status}\nError: ${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `❌ Lỗi kết nối: ${error.message}`;
+            }
+        }
+
+        // Login
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const resultDiv = document.getElementById('loginResult');
+            const tokenDisplay = document.getElementById('tokenDisplay');
+            
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Đang đăng nhập...';
+            
+            try {
+                const response = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    currentToken = data.access_token;
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `✅ Đăng nhập thành công!\nUser: ${data.user.username}\nRole: ${data.user.role.name || data.user.role}`;
+                    
+                    tokenDisplay.style.display = 'block';
+                    tokenDisplay.textContent = `Token: ${currentToken.substring(0, 50)}...`;
+                    
+                    document.getElementById('testProtectedBtn').disabled = false;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `❌ Đăng nhập thất bại!\nStatus: ${response.status}\nError: ${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `❌ Lỗi kết nối: ${error.message}`;
+            }
+        }
+
+        // Logout
+        function logout() {
+            currentToken = null;
+            document.getElementById('loginResult').style.display = 'none';
+            document.getElementById('tokenDisplay').style.display = 'none';
+            document.getElementById('protectedResult').style.display = 'none';
+            document.getElementById('testProtectedBtn').disabled = true;
+        }
+
+        // Test Protected API
+        async function testProtectedAPI() {
+            if (!currentToken) {
+                alert('Vui lòng đăng nhập trước!');
+                return;
+            }
+            
+            const resultDiv = document.getElementById('protectedResult');
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Đang test...';
+            
+            try {
+                const response = await fetch('/api/v1/categories/?page=1&size=20', {
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`,
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `✅ Thành công!\nStatus: ${response.status}\nTổng số categories: ${data.total}\nSố items: ${data.items.length}\n\nDữ liệu:\n${JSON.stringify(data, null, 2)}`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `❌ Lỗi!\nStatus: ${response.status}\nError: ${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `❌ Lỗi kết nối: ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html> 
