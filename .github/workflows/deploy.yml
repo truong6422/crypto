@@ -7,7 +7,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-backend
 
 jobs:
   build-and-push:
@@ -27,11 +26,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-backend
           tags: |
             type=raw,value=latest
             type=sha,format=long
@@ -62,59 +61,36 @@ jobs:
           mkdir -p ~/.ssh
           echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          
-          # Debug Key Format (Safe Check)
-          echo "Checking key format..."
-          LINE_COUNT=$(wc -l < ~/.ssh/id_rsa)
-          echo "Key line count: $LINE_COUNT"
-          if [ "$LINE_COUNT" -lt 2 ]; then
-            echo "::error::Private key seems to be a single line. Please check GitHub Secrets and ensure newlines are preserved."
-            exit 1
-          fi
-          
-          # Validate Key
-          if ! ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null 2>&1; then
-             echo "::error::Invalid Private Key format. OpenSSH cannot read it."
-             echo "First line: $(head -n 1 ~/.ssh/id_rsa)"
-             exit 1
-          fi
-          
-          # Add host key to known_hosts to avoid interactive prompt
           ssh-keyscan -H $HOSTNAME >> ~/.ssh/known_hosts || true
           
-          echo "Testing connection and creating directory..."
-          # Use -v for verbose output to debug connection issues
-          ssh -v -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
-          
-          echo "Copying docker-compose.yml..."
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa docker-compose.yml $USER_NAME@$HOSTNAME:~/app/docker-compose.yml
-          
-          echo "Executing remote deployment..."
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
-            cd ~/app
-            
-            # Setup environment variables
-            # We hardcode the repo name logic here since we are in a single-quoted heredoc
-            # Note: We need to pass the repo name properly. 
-            # It's safer to pass it via an env var to the ssh command, but for simplicity we will recalculate or just use the fixed value if known.
-            # Let's try to inject the value by closing and reopening the quote if needed, or better:
-            # simply set the .env content from the local machine and copy it!
-          EOF
-          
-          # Better approach: Create .env locally and scp it
+          # 1. Tạo file .env cục bộ với cú pháp an toàn
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "BACKEND_IMAGE=ghcr.io/$REPO-backend:latest" > .env
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env $USER_NAME@$HOSTNAME:~/app/.env
-          
-          # Final Deploy Command
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
-            cd ~/app
-            
-            # Login logic (if needed in future)
-            # ...
-            
-            # Pull and Restart
-            docker compose pull backend
-            docker compose up -d backend
-            docker image prune -f
+          cat << EOF > .env
+          BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          ENVIRONMENT=production
           EOF
+          
+          # Xóa bỏ các khoảng trắng thừa ở đầu dòng trong file .env (do indent của YAML)
+          sed -i 's/^[[:space:]]*//' .env
+
+          # 2. Tạo thư mục và copy files lên EC2
+          ssh -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
+          scp -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
+          
+          # 3. Thực thi deploy trên remote
+          ssh -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'REMOTEEFFECT'
+            cd ~/app
+            docker compose pull
+            docker compose up -d db redis
+            echo "Đang đợi database khởi động..."
+            sleep 10
+            docker compose run --rm backend alembic upgrade head
+            docker compose up -d
+            docker image prune -f
+          REMOTEEFFECT

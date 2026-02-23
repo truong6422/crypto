@@ -2,12 +2,13 @@ services:
   db:
     image: postgres:15-alpine
     container_name: crypto-db
+    restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: crypto_db
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-crypto}
     ports:
-      - "5434:5432"
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -16,35 +17,94 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    container_name: crypto-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
   backend:
-    image: ${BACKEND_IMAGE:-crypto-backend:latest}
+    image: ${BACKEND_IMAGE:-crypto-app:latest}
     build:
       context: .
       dockerfile: Dockerfile
     container_name: crypto-backend
+    restart: always
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     environment:
-      DATABASE_URL: postgresql://postgres:postgrespassword@db:5432/crypto_db
-      SECRET_KEY: dev-secret-key-change-in-production
-      ENVIRONMENT: development
-      CORS_ORIGINS: '["http://localhost:8080", "http://localhost:5173"]'
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-crypto}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      ENVIRONMENT: production
+      PYTHONPATH: /app
+    working_dir: /app/apps/backend
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "8001:8000"
 
-#   frontend:
-#     image: crypto-frontend:latest
-#     build:
-#       context: ./apps/frontend
-#       dockerfile: Dockerfile
-#     container_name: crypto-frontend
-#     depends_on:
-#       - backend
-#     environment:
-#       - VITE_API_BASE_URL=http://localhost:8000
-#     ports:
-#       - "8080:80"
+  celery_worker:
+    image: ${BACKEND_IMAGE:-crypto-app:latest}
+    container_name: crypto-worker
+    restart: always
+    depends_on:
+      - backend
+      - redis
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-crypto}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      PYTHONPATH: /app
+    working_dir: /app/apps/backend
+    command: celery -A src.celery_app:celery_app worker --loglevel=info
+
+  celery_beat:
+    image: ${BACKEND_IMAGE:-crypto-app:latest}
+    container_name: crypto-beat
+    restart: always
+    depends_on:
+      - backend
+      - redis
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-crypto}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      PYTHONPATH: /app
+    working_dir: /app/apps/backend
+    command: celery -A src.celery_app:celery_app beat --loglevel=info
+
+  telegram_bot:
+    image: ${BACKEND_IMAGE:-crypto-app:latest}
+    container_name: crypto-bot
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BACKEND_URL: http://backend:8000
+      PYTHONPATH: /app
+    working_dir: /app/apps/telegram_bot
+    command: python3 main.py
+
+  flower:
+    image: ${BACKEND_IMAGE:-crypto-app:latest}
+    container_name: crypto-flower
+    restart: always
+    depends_on:
+      - redis
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      PYTHONPATH: /app
+    working_dir: /app/apps/backend
+    command: celery -A src.celery_app:celery_app flower --port=5555
 
 volumes:
   postgres_data:

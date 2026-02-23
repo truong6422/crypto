@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 import os
 
 from .auth.router import router as auth_router
+from .crypto.router import router as crypto_router
 
 from .config import settings
 
@@ -47,6 +48,7 @@ if os.path.exists("static"):
 
 # Include routers
 app.include_router(auth_router, prefix="/api", tags=["Authentication"])
+app.include_router(crypto_router, prefix="/api/crypto", tags=["Crypto"])
 
 
 @app.get("/health")

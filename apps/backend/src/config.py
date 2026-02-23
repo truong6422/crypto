@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "static/avatars"
     MAX_FILE_SIZE: int = 5 * 1024 * 1024  # 5MB
 
+    # Telegram
+    TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN", None)
+    TELEGRAM_CHAT_ID: Optional[str] = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_ADMIN_CHAT_ID")
+
     class Config:
         env_file = env_path
         case_sensitive = True

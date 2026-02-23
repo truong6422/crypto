@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Float,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -100,7 +101,6 @@ class UserProfile(Base):
     gender = Column(String(20), nullable=True)  # Uses Gender enum values
     
     # Preferences
-    # Preferences
     preferences = Column(Text, nullable=True)  # JSON string for user preferences
     
     # Timestamps
@@ -111,4 +111,17 @@ class UserProfile(Base):
     user = relationship("User", backref="profile", uselist=False)
     
     def __repr__(self):
-        return f"<UserProfile(id={self.id}, user_id={self.user_id})>" 
+        return f"<UserProfile(id={self.id}, user_id={self.user_id})>"
+
+
+class CryptoHistory(Base):
+    """Lưu trữ lịch sử giá crypto để phân tích xu hướng và gợi ý đầu tư."""
+    __tablename__ = "crypto_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(50), index=True, nullable=False)
+    price = Column(Float, nullable=False)
+    timestamp = Column(DateTime, default=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f"<CryptoHistory(symbol='{self.symbol}', price={self.price})>"

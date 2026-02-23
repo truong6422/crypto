@@ -106,4 +106,30 @@ class Config:
     # Locale
     DEFAULT_LOCALE = "vi"
     SUPPORTED_LOCALES = ["vi", "en", "fr"]
-    LOCALE_PATH = "locales" 
+    LOCALE_PATH = "locales"
+
+class CryptoAssets:
+    """Các tài sản crypto trên sàn OKX (V5 API)."""
+    BTC = "BTC-USDT"
+    ETH = "ETH-USDT"
+    SOL = "SOL-USDT"
+    BNB = "BNB-USDT"
+    DEFAULT_IDS = [BTC, ETH, SOL, BNB]
+
+class CryptoConfig:
+    """Các thiết lập cấu hình cho hệ thống theo dõi Crypto."""
+    # Tần suất crawl giá (giây) - 1 phút = 60 giây
+    CRAWL_INTERVAL_SECONDS = 60.0
+    
+    # Thời gian giữ lại dữ liệu (giờ) - 168h = 7 ngày
+    DATA_RETENTION_HOURS = 168
+    
+    # Thời gian chạy dọn dẹp (giờ:phút)
+    CLEANUP_HOUR = 0
+    CLEANUP_MINUTE = 0
+    
+    # Tần suất gửi báo cáo định kỳ (giây) - 10 phút = 600 giây
+    REPORT_INTERVAL_SECONDS = 600.0
+    
+    # Ngưỡng biến động giá để cảnh báo (%)
+    VOLATILITY_THRESHOLD_PCT = 1.0
