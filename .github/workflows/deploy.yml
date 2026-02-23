@@ -67,13 +67,16 @@ jobs:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOSTNAME: ${{ secrets.EC2_HOST }}
           USER_NAME: ${{ secrets.EC2_USER }}
-          # Pass credentials for server login
           REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
           REGISTRY_USER: ${{ github.actor }}
+          # Truyền trực tiếp tên Image vào bước deploy để chắc chắn
         run: |
           mkdir -p ~/.ssh
           printf "%s\n" "$PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          
+          REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          B_IMAGE="${{ env.REGISTRY }}/${REPO}-backend:latest"
           
           echo "📡 Kết nối tới $HOSTNAME..."
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
@@ -84,35 +87,28 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << EOF
             cd ~/app
             
-            # 1. Đăng nhập vào Registry (Bắt buộc để pull)
+            # 1. Đăng nhập vào Registry (Sử dụng biến truyền từ GitHub)
             echo "$REGISTRY_PASSWORD" | sudo docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
 
-            # 2. Tắt và dọn dẹp sạch bản cũ
-            echo "🛑 Đang tắt các dịch vụ cũ..."
-            sudo docker compose down --remove-orphans
+            # 2. Ép tải Image mới nhất dùng tên biến cụ thể
+            echo "📥 Đang tải Image mới: $B_IMAGE"
+            BACKEND_IMAGE=$B_IMAGE sudo docker compose pull
             
-            echo "🧹 Dọn dẹp Image và Cache thừa..."
-            sudo docker system prune -f
+            # 3. Khởi động TOÀN BỘ các dịch vụ cùng lúc
+            echo "� Đang khởi động hệ thống (Backend, Bot, DB, Redis, Worker)..."
+            BACKEND_IMAGE=$B_IMAGE sudo docker compose up -d --remove-orphans
             
-            # 3. Tải Image mới nhất
-            echo "📥 Đang tải Image mới: $BACKEND_IMAGE"
-            sudo docker compose pull
+            echo "⏳ Đợi 15 giây để Database sẵn sàng..."
+            sleep 15
             
-            # 4. Khởi động DB trước
-            echo "🐘 Khởi động Database & Redis..."
-            sudo docker compose up -d db redis
-            echo "⏳ Đợi DB sẵn sàng..."
-            sleep 10
+            # 4. Chạy Migration bên trong container đang chạy (An toàn hơn)
+            echo "🔄 Cập nhật Database Schema (nếu cần)..."
+            sudo docker compose exec -T backend alembic upgrade head || echo "⚠️ Cảnh báo: Không thể chạy migration tự động, hãy kiểm tra log sau."
             
-            # 5. Cập nhật Database (Không để lỗi này làm sập cả quy trình deploy)
-            echo "🔄 Đang kiểm tra và cập nhật Database Schema..."
-            sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Cảnh báo: Migration có lỗi nhưng vẫn tiếp tục khởi động hệ thống..."
+            # 5. Dọn dẹp rác
+            sudo docker image prune -f
             
-            # 6. Khởi động lại toàn bộ với code mới
-            echo "🚀 Khởi động các dịch vụ: Backend, Bot, Worker..."
-            sudo docker compose up -d --force-recreate
-            
-            echo "✅ KIỂM TRA TRẠNG THÁI CUỐI CÙNG:"
+            echo "✅ TRẠNG THÁI HỆ THỐNG:"
             sudo docker compose ps
             
             echo "✨ DEPLOY HOÀN TẤT!"
