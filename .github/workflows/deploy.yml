@@ -26,11 +26,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Lowercase repo name
+        run: |
+          echo "IMAGE_NAME=${{ env.REGISTRY }}/$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')-backend" >> $GITHUB_ENV
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}-backend
+          images: ${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest
 
@@ -52,15 +56,10 @@ jobs:
 
       - name: Create .env file from Single Secret
         run: |
-          # 1. Ghi toàn bộ nội dung từ secret ENV_CONFIG vào file
           echo "${{ secrets.ENV_CONFIG }}" > .env
-          
-          # 2. Tự động thêm/cập nhật BACKEND_IMAGE (để bạn không cần quan tâm phần này)
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           sed -i '/BACKEND_IMAGE/d' .env 
           echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest" >> .env
-          
-          # 3. Đảm bảo PYTHONPATH luôn đúng
           echo "PYTHONPATH=/app" >> .env
 
       - name: 🚀 Final Deploy via Native SSH
@@ -76,36 +75,36 @@ jobs:
           echo "📡 Kết nối tới $HOSTNAME..."
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
           
-          echo "📤 Đang chuyển file .env và docker-compose..."
+          echo "📤 Đăng chuyển file .env và docker-compose..."
           scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
-          echo "⚙️ Đang thực thi lệnh trên Server..."
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
+            set -e
             cd ~/app
             
-            # Kiểm tra Docker
+            # Đảm bảo có Docker
             if ! [ -x "$(command -v docker)" ]; then
               sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
               sudo usermod -aG docker $USER
             fi
 
-            # Dọn dẹp trước để giải phóng bộ nhớ (tránh tràn đĩa)
-            sudo docker system prune -af
+            # Dọn dẹp trước để tránh đầy đĩa
+            sudo docker system prune -f
             
-            echo "📥 Đang tải Image mới..."
+            echo "📥 Đang tải Image mới: $BACKEND_IMAGE"
+            # Ép pull image mới nhất
             sudo docker compose pull
             
+            echo "🔄 Cập nhật database..."
             sudo docker compose up -d db redis
-            echo "Đang đợi DB khởi động..."
-            sleep 15
-            
-            echo "🔄 Đang thực hiện Migration..."
+            sleep 10
             sudo docker compose run --rm backend alembic upgrade head
             
-            echo "🚀 Khởi động toàn bộ dịch vụ..."
-            sudo docker compose up -d
+            echo "🚀 Khởi động dịch vụ mới..."
+            # Sử dụng --force-recreate để đảm bảo code mới được nạp
+            sudo docker compose up -d --force-recreate
             
-            # Dọn dẹp lại lần cuối cho chắc chắn
+            # Xóa các image cũ "dangling"
             sudo docker image prune -f
-            echo "✨ DEPLOY THÀNH CÔNG!"
+            echo "✨ DEPLOY HOÀN TẤT!"
           EOF
