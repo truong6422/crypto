@@ -50,47 +50,80 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: 🔍 DEBUG - Check Metadata & Connectivity
+        env:
+          HOSTNAME: ${{ secrets.EC2_HOST }}
+          USER_NAME: ${{ secrets.EC2_USER }}
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          echo "=== DEBUG INFORMATION ==="
+          echo "Target Host: $HOSTNAME"
+          echo "User Name: $USER_NAME"
+          
+          if [ -z "$HOSTNAME" ]; then echo "❌ Missing EC2_HOST secret!"; exit 1; fi
+          if [ -z "$USER_NAME" ]; then echo "❌ Missing EC2_USER secret!"; exit 1; fi
+          if [ -z "$SSH_KEY" ]; then echo "❌ Missing EC2_SSH_KEY secret!"; exit 1; fi
+          
+          echo "SSH Key length: $(echo -n "$SSH_KEY" | wc -c) characters"
+          echo "SSH Key first line: $(echo "$SSH_KEY" | head -n 1)"
+          echo "SSH Key last line: $(echo "$SSH_KEY" | tail -n 1)"
+          
+          if [[ "$SSH_KEY" != *"BEGIN"* ]]; then
+            echo "❌ ERROR: Private Key format is invalid (Missing BEGIN header)!"
+          fi
+          
+          echo "Testing latency to host..."
+          ping -c 3 $HOSTNAME || echo "⚠️ Ping failed (Normal if ICMP is blocked in Security Group)"
+          
+          echo "Checking if SSH port (22) is open..."
+          nc -zv -w5 $HOSTNAME 22 || echo "❌ PORT 22 IS CLOSED OR UNREACHABLE!"
+          echo "========================="
+
       - name: Create .env file
         run: |
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest" > .env
-          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
-          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
-          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
-          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
-          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}" >> .env
-          echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
-          echo "ENVIRONMENT=production" >> .env
-          echo "PYTHONPATH=/app" >> .env
+          {
+            echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest"
+            echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}"
+            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}"
+            echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}"
+            echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}"
+            echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}"
+            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}"
+            echo "ENVIRONMENT=production"
+            echo "PYTHONPATH=/app"
+          } > .env
 
-      - name: Copy files to EC2
-        uses: appleboy/scp-action@master
+      - name: 🚀 SCP Transfer (with Debug)
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          debug: true
           source: ".env,docker-compose.yml"
           target: "~/app"
 
-      - name: Execute remote ssh commands
-        uses: appleboy/ssh-action@master
+      - name: 💻 SSH Execution (with Debug)
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          debug: true
           script: |
             cd ~/app
-            echo "📥 Kéo image mới nhất..."
-            docker compose pull
-            echo "🐘 Khởi động DB và Redis..."
-            docker compose up -d db redis
-            echo "⏳ Đợi DB sẵn sàng..."
+            echo "Current User: $(whoami)"
+            echo "📥 Pulling images..."
+            sudo docker compose pull
+            echo "🐘 Starting DB & Redis..."
+            sudo docker compose up -d db redis
             sleep 15
-            echo "🔄 Chạy database migration..."
-            # Khởi động backend tạm thời để chạy migration
-            docker compose run --rm backend alembic upgrade head
-            echo "🚀 Khởi động tất cả dịch vụ..."
-            docker compose up -d
-            echo "🧹 Dọn dẹp tài nguyên cũ..."
-            docker image prune -f
-            echo "✅ DEPLOY THÀNH CÔNG!"
+            echo "🔄 Running Migrations..."
+            sudo docker compose run --rm backend alembic upgrade head
+            echo "🚀 Starting all services..."
+            sudo docker compose up -d
+            sudo docker image prune -f
+            echo "✨ DEPLOY SUCCESSFUL!"
