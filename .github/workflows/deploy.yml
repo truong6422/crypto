@@ -87,30 +87,39 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << EOF
             cd ~/app
             
-            # 1. Đăng nhập vào Registry (Sử dụng biến truyền từ GitHub)
+            # 1. Tắt mọi thứ để giải phóng RAM (Cực kỳ quan trọng với t2.micro)
+            echo "🧹 Giải phóng RAM: Tắt toàn bộ dịch vụ cũ..."
+            sudo docker compose down --remove-orphans
+            
+            # 2. Xóa các image cũ và cache để tránh đầy ổ cứng
+            sudo docker system prune -f
+            
+            # 3. Đăng nhập và Pull Image (Từng bước để tránh nghẽn I/O)
             echo "$REGISTRY_PASSWORD" | sudo docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
-
-            # 2. Ép tải Image mới nhất dùng tên biến cụ thể
             echo "📥 Đang tải Image mới: $B_IMAGE"
             BACKEND_IMAGE=$B_IMAGE sudo docker compose pull
             
-            # 3. Khởi động TOÀN BỘ các dịch vụ cùng lúc
-            echo "� Đang khởi động hệ thống (Backend, Bot, DB, Redis, Worker)..."
-            BACKEND_IMAGE=$B_IMAGE sudo docker compose up -d --remove-orphans
+            # 4. KHỞI ĐỘNG TUẦN TỰ (Sequential Startup)
             
-            echo "⏳ Đợi 15 giây để Database sẵn sàng..."
+            echo "🛢️ 1. Khởi động Database & Redis..."
+            BACKEND_IMAGE=$B_IMAGE sudo docker compose up -d db redis
             sleep 15
             
-            # 4. Chạy Migration bên trong container đang chạy (An toàn hơn)
-            echo "🔄 Cập nhật Database Schema (nếu cần)..."
-            sudo docker compose exec -T backend alembic upgrade head || echo "⚠️ Cảnh báo: Không thể chạy migration tự động, hãy kiểm tra log sau."
+            echo "🔄 2. Chạy Migration (Chạy xong rồi xóa container ngay để tiết kiệm RAM)..."
+            BACKEND_IMAGE=$B_IMAGE sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Migration có cảnh báo."
+            sleep 5
             
-            # 5. Dọn dẹp rác
-            sudo docker image prune -f
+            echo "⚙️ 3. Khởi động Backend..."
+            BACKEND_IMAGE=$B_IMAGE sudo docker compose up -d backend
+            sleep 20
             
-            echo "✅ TRẠNG THÁI HỆ THỐNG:"
+            echo "🤖 4. Khởi động Telegram Bot & Worker..."
+            BACKEND_IMAGE=$B_IMAGE sudo docker compose up -d telegram_bot celery_worker celery_beat
+            
+            echo "✅ KIỂM TRA TÀI NGUYÊN:"
+            free -m
             sudo docker compose ps
             
-            echo "✨ DEPLOY HOÀN TẤT!"
+            echo "✨ DEPLOY HOÀN TẤT NHẸ NHÀNG!"
             sudo docker logout ghcr.io
           EOF
