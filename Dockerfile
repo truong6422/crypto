@@ -24,15 +24,17 @@ RUN apt-get update \
         python3-dev \
         postgresql-client \
         libpq-dev \
+        libatlas-base-dev \
+        gfortran \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements from both apps
 COPY apps/backend/requirements.txt ./backend-requirements.txt
 COPY apps/telegram_bot/requirements.txt ./bot-requirements.txt
 
-# Install all dependencies
-RUN uv pip install --no-cache --system -r backend-requirements.txt
-RUN uv pip install --no-cache --system -r bot-requirements.txt
+# Install all dependencies with verbose for debugging
+RUN uv pip install --no-cache --system --verbose -r backend-requirements.txt
+RUN uv pip install --no-cache --system --verbose -r bot-requirements.txt
 
 # Copy all application code
 COPY apps/ /app/apps/
