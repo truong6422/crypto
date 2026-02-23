@@ -10,8 +10,63 @@ from src.constants import CryptoAssets, CryptoConfig
 logger = logging.getLogger(__name__)
 
 @celery_app.task
+def backfill_historical_data(symbol: str = None):
+    """
+    Tự động lấy dữ liệu lịch sử từ OKX (1m và 1D) nếu DB chưa đủ dữ liệu.
+    """
+    symbols = [symbol] if symbol else CryptoAssets.DEFAULT_IDS
+    db = get_session_local()()
+    
+    try:
+        from src.models import CryptoHistory, CryptoDaily
+        import time
+        
+        for s in symbols:
+            # 1. Backfill nến 1 phút (Để tính TA ngắn hạn)
+            count_1m = db.query(CryptoHistory).filter(CryptoHistory.symbol == s).count()
+            if count_1m < 50:
+                logger.info(f"⏳ Backfill 300 nến 1m cho {s}...")
+                candles = CryptoScraperService.get_historical_candles(s, bar="1m", limit=300)
+                for c in candles:
+                    db.add(CryptoHistory(symbol=s, price=c["price"], timestamp=c["timestamp"]))
+                db.commit()
+                time.sleep(2) # Nghỉ để không bị rate limit
+            
+            # 2. Backfill nến 1 Ngày (Để xem xu hướng dài hạn)
+            count_1d = db.query(CryptoDaily).filter(CryptoDaily.symbol == s).count()
+            if count_1d < 10:
+                logger.info(f"⏳ Backfill 100 nến 1D cho {s}...")
+                candles = CryptoScraperService.get_historical_candles(s, bar="1D", limit=100)
+                for c in candles:
+                    db.add(CryptoDaily(symbol=s, price=c["price"], timestamp=c["timestamp"]))
+                db.commit()
+                time.sleep(2)
+                
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi backfill dữ liệu: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+@celery_app.task
+def update_daily_candles():
+    """Cập nhật nến ngày định kỳ (mỗi giờ)."""
+    db = get_session_local()()
+    try:
+        for s in CryptoAssets.DEFAULT_IDS:
+            candles = CryptoScraperService.get_historical_candles(s, bar="1D", limit=1)
+            if candles:
+                CryptoRepository.save_price(db, s, candles[0]["price"], timeframe="1D", timestamp=candles[0]["timestamp"])
+        logger.info("✅ Đã cập nhật nến ngày cho các tài sản.")
+    finally:
+        db.close()
+
+@celery_app.task
 def crawl_and_save_prices():
     """Task tự động lấy giá crypto, lưu vào database và cảnh báo biến động."""
+    # Đảm bảo có dữ liệu lịch sử trước khi crawl bản ghi mới
+    backfill_historical_data.delay()
+    
     logger.info("🚀 Celery Task: Bắt đầu crawl giá crypto...")
     
     db = get_session_local()()
@@ -88,12 +143,15 @@ def send_periodic_report():
 
 @celery_app.task
 def cleanup_old_prices():
-    """Dọn dẹp dữ liệu cũ (mặc định > 7 ngày)."""
+    """Dọn dẹp dữ liệu cũ để bảo vệ server yếu."""
     logger.info("🧹 Celery Task: Đang dọn dẹp dữ liệu cũ...")
     db = get_session_local()()
     try:
-        count = CryptoRepository.clear_old_data(db, hours=CryptoConfig.DATA_RETENTION_HOURS)
-        logger.info(f"✅ Đã xóa {count} bản ghi cũ.")
+        # Giữ nến 1m trong 2 ngày (đủ để xem chart ngắn hạn)
+        count_1m = CryptoRepository.clear_old_data(db, hours=48, timeframe="1m")
+        # Giữ nến 1D trong 90 ngày (đủ để xem xu hướng quý)
+        count_1d = CryptoRepository.clear_old_data(db, hours=168*12, timeframe="1D") 
+        logger.info(f"✅ Đã xóa {count_1m} nến 1m và {count_1d} nến 1D cũ.")
     except Exception as e:
         logger.error(f"❌ Lỗi khi dọn dẹp dữ liệu: {e}")
     finally:

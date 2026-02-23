@@ -37,5 +37,9 @@ celery_app.conf.beat_schedule = {
     "send-periodic-report-every-10-minutes": {
         "task": "src.crypto.tasks.send_periodic_report",
         "schedule": CryptoConfig.REPORT_INTERVAL_SECONDS,
+    },
+    "update-daily-candles-every-hour": {
+        "task": "src.crypto.tasks.update_daily_candles",
+        "schedule": crontab(minute=0), # Chạy vào phút thứ 0 mỗi giờ
     }
 }

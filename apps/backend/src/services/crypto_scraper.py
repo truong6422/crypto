@@ -38,6 +38,48 @@ class CryptoScraperService:
             return []
 
     @classmethod
+    def get_historical_candles(cls, symbol: str, bar: str = "1m", limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Lấy dữ liệu nến lịch sử từ OKX.
+        
+        Args:
+            symbol: Mã coin (ví dụ BTC-USDT).
+            bar: Khung thời gian (1m: 1 phút, 1D: 1 ngày).
+            limit: Số lượng nến cần lấy.
+            
+        Returns:
+            List[Dict]: Dữ liệu nến gồm timestamp và giá đóng cửa.
+        """
+        from datetime import datetime
+        url = f"{cls.BASE_URL}/market/history-candles"
+        params = {
+            "instId": symbol,
+            "bar": bar,
+            "limit": str(limit)
+        }
+        
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json().get("data", [])
+            
+            # OKX returns [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+            # Ta chỉ cần ts và close
+            formatted_data = []
+            for candle in data:
+                formatted_data.append({
+                    "timestamp": datetime.fromtimestamp(int(candle[0]) / 1000),
+                    "price": float(candle[4])
+                })
+            
+            # API trả về từ mới đến cũ, ta cần đảo ngược lại để lưu vào DB theo thứ tự
+            return formatted_data[::-1]
+            
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy dữ liệu lịch sử cho {symbol}: {e}")
+            return []
+
+    @classmethod
     def format_price_message(cls, data: List[Dict[str, Any]]) -> str:
         """ Định dạng dữ liệu từ OKX thành tin nhắn văn bản. """
         if not data:

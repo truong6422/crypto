@@ -115,7 +115,7 @@ class UserProfile(Base):
 
 
 class CryptoHistory(Base):
-    """Lưu trữ lịch sử giá crypto để phân tích xu hướng và gợi ý đầu tư."""
+    """Lưu trữ lịch sử giá crypto theo phút (1m)."""
     __tablename__ = "crypto_history"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -125,3 +125,16 @@ class CryptoHistory(Base):
 
     def __repr__(self):
         return f"<CryptoHistory(symbol='{self.symbol}', price={self.price})>"
+
+
+class CryptoDaily(Base):
+    """Lưu trữ lịch sử giá crypto theo ngày (1D)."""
+    __tablename__ = "crypto_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(50), index=True, nullable=False)
+    price = Column(Float, nullable=False)
+    timestamp = Column(DateTime, nullable=False)
+
+    def __repr__(self):
+        return f"<CryptoDaily(symbol='{self.symbol}', price={self.price})>"

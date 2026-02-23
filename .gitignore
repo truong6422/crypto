@@ -153,3 +153,5 @@ __pycache__/
 
 *.egg-info
 crypto_deploy*
+celerybeat-schedule
+dump.rdb

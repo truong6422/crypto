@@ -44,3 +44,7 @@ babel==2.14.0
 
 # Logging
 structlog==23.2.0
+
+# Data Analysis
+pandas==2.2.2
+pandas-ta==0.3.14b0
