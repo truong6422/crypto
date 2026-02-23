@@ -33,7 +33,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-backend
           tags: |
             type=raw,value=latest
-            type=sha,format=long
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -57,40 +56,35 @@ jobs:
           HOSTNAME: ${{ secrets.EC2_HOST }}
           USER_NAME: ${{ secrets.EC2_USER }}
         run: |
-          # Setup SSH
+          # 1. Setup SSH
           mkdir -p ~/.ssh
-          echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
+          printf "%s" "$PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $HOSTNAME >> ~/.ssh/known_hosts || true
           
-          # 1. Tạo file .env cục bộ với cú pháp an toàn
+          # 2. Tạo file .env bằng printf (an toàn nhất cho YAML)
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          cat << EOF > .env
-          BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest
-          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
-          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
-          SECRET_KEY=${{ secrets.SECRET_KEY }}
-          ENVIRONMENT=production
-          EOF
-          
-          # Xóa bỏ các khoảng trắng thừa ở đầu dòng trong file .env (do indent của YAML)
-          sed -i 's/^[[:space:]]*//' .env
+          printf "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest\n" > .env
+          printf "POSTGRES_USER=${{ secrets.POSTGRES_USER }}\n" >> .env
+          printf "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}\n" >> .env
+          printf "POSTGRES_DB=${{ secrets.POSTGRES_DB }}\n" >> .env
+          printf "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}\n" >> .env
+          printf "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}\n" >> .env
+          printf "SECRET_KEY=${{ secrets.SECRET_KEY }}\n" >> .env
+          printf "ENVIRONMENT=production\n" >> .env
 
-          # 2. Tạo thư mục và copy files lên EC2
-          ssh -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
-          scp -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
+          # 3. Deploy
+          echo "🚀 Đang deploy tới $HOSTNAME..."
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
-          # 3. Thực thi deploy trên remote
-          ssh -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'REMOTEEFFECT'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
+            mkdir -p ~/app
             cd ~/app
             docker compose pull
             docker compose up -d db redis
-            echo "Đang đợi database khởi động..."
-            sleep 10
+            sleep 15
             docker compose run --rm backend alembic upgrade head
             docker compose up -d
             docker image prune -f
-          REMOTEEFFECT
+            echo "✅ DEPLOY SUCCESSFUL!"
+          EOF
