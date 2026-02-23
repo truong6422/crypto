@@ -89,12 +89,23 @@ jobs:
               sudo usermod -aG docker $USER
             fi
 
+            # Dọn dẹp trước để giải phóng bộ nhớ (tránh tràn đĩa)
+            sudo docker system prune -af
+            
+            echo "📥 Đang tải Image mới..."
             sudo docker compose pull
+            
             sudo docker compose up -d db redis
             echo "Đang đợi DB khởi động..."
             sleep 15
+            
+            echo "🔄 Đang thực hiện Migration..."
             sudo docker compose run --rm backend alembic upgrade head
+            
+            echo "🚀 Khởi động toàn bộ dịch vụ..."
             sudo docker compose up -d
+            
+            # Dọn dẹp lại lần cuối cho chắc chắn
             sudo docker image prune -f
             echo "✨ DEPLOY THÀNH CÔNG!"
           EOF
