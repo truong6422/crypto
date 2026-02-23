@@ -67,6 +67,9 @@ jobs:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOSTNAME: ${{ secrets.EC2_HOST }}
           USER_NAME: ${{ secrets.EC2_USER }}
+          # Pass credentials for server login
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
         run: |
           mkdir -p ~/.ssh
           printf "%s\n" "$PRIVATE_KEY" > ~/.ssh/id_rsa
@@ -75,24 +78,23 @@ jobs:
           echo "📡 Kết nối tới $HOSTNAME..."
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
           
-          echo "📤 Đăng chuyển file .env và docker-compose..."
+          echo "📤 Đang chuyển file .env và docker-compose..."
           scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << EOF
             set -e
             cd ~/app
             
-            # Đảm bảo có Docker
-            if ! [ -x "$(command -v docker)" ]; then
-              sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
-              sudo usermod -aG docker $USER
-            fi
+            # 1. Đăng nhập vào Registry ngay trên server (BẮT BUỘC để pull bản mới)
+            echo "$REGISTRY_PASSWORD" | sudo docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
 
-            # Dọn dẹp trước để tránh đầy đĩa
-            sudo docker system prune -f
+            # 2. Dọn dẹp sạch sẽ để tránh xung đột hoặc đầy đĩa
+            echo "🧹 Đang dọn dẹp hệ thống..."
+            sudo docker compose down --remove-orphans
+            sudo docker system prune -af
             
-            echo "📥 Đang tải Image mới: $BACKEND_IMAGE"
-            # Ép pull image mới nhất
+            # 3. Ép tải Image mới nhất
+            echo "📥 Đang tải Image mới: \$BACKEND_IMAGE"
             sudo docker compose pull
             
             echo "🔄 Cập nhật database..."
@@ -101,10 +103,8 @@ jobs:
             sudo docker compose run --rm backend alembic upgrade head
             
             echo "🚀 Khởi động dịch vụ mới..."
-            # Sử dụng --force-recreate để đảm bảo code mới được nạp
             sudo docker compose up -d --force-recreate
             
-            # Xóa các image cũ "dangling"
-            sudo docker image prune -f
             echo "✨ DEPLOY HOÀN TẤT!"
+            sudo docker logout ghcr.io
           EOF
