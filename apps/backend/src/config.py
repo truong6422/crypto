@@ -100,16 +100,6 @@ class Settings(BaseSettings):
         print(f"DEBUG from env: {os.getenv('DEBUG')}")
         print("===================================")
         
-        # Render specific configurations
-        if os.getenv("DATABASE_URL"):
-            # Render provides DATABASE_URL with postgres:// prefix
-            # but SQLAlchemy expects postgresql://
-            database_url = os.getenv("DATABASE_URL")
-            if database_url.startswith("postgres://"):
-                database_url = database_url.replace("postgres://", "postgresql://", 1)
-            self.DATABASE_URL = database_url
-            print(f"Final DATABASE_URL: {self.DATABASE_URL}")
-        
         if os.getenv("REDIS_URL"):
             self.REDIS_URL = os.getenv("REDIS_URL")
             print(f"Final REDIS_URL: {self.REDIS_URL}")
@@ -134,12 +124,6 @@ class Settings(BaseSettings):
             self.DEBUG = False
             print(f"Production mode - DEBUG: {self.DEBUG}")
             print(f"Production mode - ALLOWED_ORIGINS: {self.ALLOWED_ORIGINS}")
-            
-            # Ensure production frontend URL is in allowed origins
-            production_frontend = "https://daily-home-meals-frontend.onrender.com"
-            if production_frontend not in self.ALLOWED_ORIGINS:
-                self.ALLOWED_ORIGINS.append(production_frontend)
-                print(f"Added production frontend URL to allowed origins: {production_frontend}")
 
 
 settings = Settings()
