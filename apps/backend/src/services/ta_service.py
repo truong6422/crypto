@@ -21,12 +21,15 @@ class TechnicalAnalysisService:
             Dict chứa các giá trị chỉ số mới nhất (RSI, MACD, BBands).
         """
         if not history_data or len(history_data) < 20:
+            logger.info(f"Dữ liệu không đủ để tính TA: {len(history_data) if history_data else 0} bản ghi.")
             return {
                 "rsi": None,
                 "macd": None,
                 "bbands": None,
                 "status": "Dữ liệu không đủ (Cần ít nhất 20 điểm dữ liệu)"
             }
+
+        logger.info(f"Đang tính toán TA cho {len(history_data)} điểm dữ liệu.")
 
         try:
             # 1. Chuyển đổi sang DataFrame

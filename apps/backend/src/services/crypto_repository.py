@@ -115,15 +115,16 @@ class CryptoRepository:
         history_1m = CryptoRepository.get_recent_history(db, symbol, limit=100, timeframe="1m")
         history_1d = CryptoRepository.get_recent_history(db, symbol, limit=30, timeframe="1D")
         
-        ta_1m = TechnicalAnalysisService.calculate_indicators(history_1m)
-        ta_1d = TechnicalAnalysisService.calculate_indicators(history_1d)
-        
+        # 2. Kiểm tra dữ liệu đủ để phân tích chưa
+        if ta_1m.get("status") != "success":
+            return f"⚪ ĐANG CẬP NHẬT [Chưa đủ dữ liệu nến]"
+
         score = 0
         reasons = []
 
         # --- Tín hiệu RSI (1m) ---
         rsi_1m = ta_1m.get("rsi")
-        if rsi_1m:
+        if rsi_1m is not None:
             if rsi_1m < 30:
                 score += 2
                 reasons.append(f"RSI Quá bán ({rsi_1m:.1f})")
@@ -139,7 +140,7 @@ class CryptoRepository:
 
         # --- Tín hiệu Bollinger Bands (1m) ---
         bb = ta_1m.get("bbands")
-        if bb:
+        if bb and bb["lower"] is not None and bb["upper"] is not None:
             if current_price <= bb["lower"]:
                 score += 2
                 reasons.append("Chạm đáy BB")
@@ -149,7 +150,7 @@ class CryptoRepository:
 
         # --- Xu hướng nến ngày (1D) ---
         rsi_1d = ta_1d.get("rsi")
-        if rsi_1d:
+        if rsi_1d is not None:
             if rsi_1d > 55:
                 score += 1
                 reasons.append("Xu hướng ngày Tăng")

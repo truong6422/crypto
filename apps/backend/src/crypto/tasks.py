@@ -77,47 +77,49 @@ def update_daily_candles():
 
 @celery_app.task
 def crawl_and_save_prices():
-    """Crawl giá từ OKX, lưu vào DB và gửi cảnh báo nếu biến động mạnh."""
-    # Đảm bảo có dữ liệu lịch sử trước khi crawl bản ghi mới
+    """Crawl nến 1m từ OKX, lưu vào DB và gửi cảnh báo nếu biến động mạnh."""
+    # Đảm bảo có đủ dữ liệu lịch sử cho các chỉ số TA
     backfill_historical_data.delay()
     
-    logger.info("🚀 Celery Task: Bắt đầu crawl giá crypto...")
+    logger.info("🚀 Celery Task: Bắt đầu crawl dữ liệu OHLCV 1m...")
     db = get_session_local()()
     
     try:
-        # 1. Lấy dữ liệu từ OKX
-        data = CryptoScraperService.get_prices()
-        if not data:
-            logger.warning("⚠️ Không lấy được dữ liệu từ OKX.")
-            return
-
-        # 2. Xử lý từng đồng coin
-        for coin in data:
-            symbol = coin.get("instId")
-            current_price = float(coin.get("last", 0))
+        for symbol in CryptoAssets.DEFAULT_IDS:
+            # Lấy nến 1m gần nhất từ OKX
+            candles = CryptoScraperService.get_historical_candles(symbol, bar="1m", limit=2)
+            if not candles:
+                continue
             
-            # --- KIỂM TRA BIẾN ĐỘNG MẠNH ---
-            last_price = CryptoRepository.get_last_price(db, symbol)
-            if last_price > 0:
-                diff_pct = ((current_price - last_price) / last_price) * 100
+            # Lấy nến vừa đóng (nến index 0 là nến cũ hơn, index 1 là nến mới nhất đang nhảy)
+            # Thông thường OKX trả về nến mới nhất ở cuối list (get_historical_candles đã reverse lại)
+            latest_candle = candles[-1]
+            current_price = latest_candle["close"]
+            
+            # 1. Kiểm tra biến động (so với nến trước đó)
+            if len(candles) > 1:
+                prev_price = candles[-2]["close"]
+                diff_pct = ((current_price - prev_price) / prev_price) * 100
                 
-                if abs(diff_pct) >= CryptoConfig.VOLATILITY_THRESHOLD_PCT:
-                    direction = "📈 TĂNG" if diff_pct > 0 else "📉 GIẢM"
-                    alert_msg = (
-                        f"⚠️ <b>CẢNH BÁO BIẾN ĐỘNG MẠNH</b>\n"
-                        f"━━━━━━━━━━━━━━━━━━\n"
-                        f"🪙 Tài sản: <b>{symbol}</b>\n"
-                        f"🔄 Trạng thái: <b>{direction} ĐỘT NGỘT</b>\n"
-                        f"📊 Mức thay đổi: <code>{diff_pct:+.2f}%</code>\n"
-                        f"💰 Giá hiện tại: <b>${current_price:,.2f}</b>\n"
-                        f"🕒 Thời gian: {datetime.now().strftime('%H:%M:%S')}"
-                    )
+                if abs(diff_pct) >= 1.0:
+                    alert_msg = f"<b>⚠️ BIẾN ĐỘNG MẠNH: {symbol}</b>\n"
+                    alert_msg += f"💰 Giá: ${current_price:,.2f} ({diff_pct:+.2f}%)\n"
                     TelegramService.send_message(alert_msg)
-                    logger.info(f"🔔 Đã gửi cảnh báo biến động cho {symbol}: {diff_pct:+.2f}%")
+
+            # 2. Lưu nến 1m với đầy đủ OHLCV
+            CryptoRepository.save_price(
+                db, 
+                symbol=symbol, 
+                price=current_price, 
+                timeframe="1m", 
+                timestamp=latest_candle["timestamp"],
+                open_p=latest_candle["open"],
+                high=latest_candle["high"],
+                low=latest_candle["low"],
+                volume=latest_candle["volume"]
+            )
             
-            logger.info(f"✅ Đã lưu giá {symbol}: ${current_price:,.2f}")
-            
-        logger.info(f"✨ Đã crawl và kiểm tra xong {len(data)} đồng coin.")
+        logger.info(f"✨ Đã cập nhật dữ liệu nến 1m cho {len(CryptoAssets.DEFAULT_IDS)} đồng coin.")
         
     except Exception as e:
         logger.error(f"❌ Lỗi trong task crawl_and_save_prices: {e}")
