@@ -115,6 +115,9 @@ class CryptoRepository:
         history_1m = CryptoRepository.get_recent_history(db, symbol, limit=100, timeframe="1m")
         history_1d = CryptoRepository.get_recent_history(db, symbol, limit=30, timeframe="1D")
         
+        ta_1m = TechnicalAnalysisService.calculate_indicators(history_1m)
+        ta_1d = TechnicalAnalysisService.calculate_indicators(history_1d)
+
         # 2. Kiểm tra dữ liệu đủ để phân tích chưa
         if ta_1m.get("status") != "success":
             return f"⚪ ĐANG CẬP NHẬT [Chưa đủ dữ liệu nến]"
