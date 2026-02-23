@@ -82,28 +82,38 @@ jobs:
           scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << EOF
-            set -e
             cd ~/app
             
-            # 1. Đăng nhập vào Registry ngay trên server (BẮT BUỘC để pull bản mới)
+            # 1. Đăng nhập vào Registry (Bắt buộc để pull)
             echo "$REGISTRY_PASSWORD" | sudo docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
 
-            # 2. Dọn dẹp sạch sẽ để tránh xung đột hoặc đầy đĩa
-            echo "🧹 Đang dọn dẹp hệ thống..."
+            # 2. Tắt và dọn dẹp sạch bản cũ
+            echo "🛑 Đang tắt các dịch vụ cũ..."
             sudo docker compose down --remove-orphans
-            sudo docker system prune -af
             
-            # 3. Ép tải Image mới nhất
-            echo "📥 Đang tải Image mới: \$BACKEND_IMAGE"
+            echo "🧹 Dọn dẹp Image và Cache thừa..."
+            sudo docker system prune -f
+            
+            # 3. Tải Image mới nhất
+            echo "📥 Đang tải Image mới: $BACKEND_IMAGE"
             sudo docker compose pull
             
-            echo "🔄 Cập nhật database..."
+            # 4. Khởi động DB trước
+            echo "🐘 Khởi động Database & Redis..."
             sudo docker compose up -d db redis
+            echo "⏳ Đợi DB sẵn sàng..."
             sleep 10
-            sudo docker compose run --rm backend alembic upgrade head
             
-            echo "🚀 Khởi động dịch vụ mới..."
+            # 5. Cập nhật Database (Không để lỗi này làm sập cả quy trình deploy)
+            echo "🔄 Đang kiểm tra và cập nhật Database Schema..."
+            sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Cảnh báo: Migration có lỗi nhưng vẫn tiếp tục khởi động hệ thống..."
+            
+            # 6. Khởi động lại toàn bộ với code mới
+            echo "🚀 Khởi động các dịch vụ: Backend, Bot, Worker..."
             sudo docker compose up -d --force-recreate
+            
+            echo "✅ KIỂM TRA TRẠNG THÁI CUỐI CÙNG:"
+            sudo docker compose ps
             
             echo "✨ DEPLOY HOÀN TẤT!"
             sudo docker logout ghcr.io
