@@ -46,5 +46,5 @@ babel==2.14.0
 structlog==23.2.0
 
 # Data Analysis
-pandas==2.2.2
-pandas-ta
+pandas==3.0.1
+pandas-ta==0.4.71b0
