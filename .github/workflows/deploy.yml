@@ -69,57 +69,57 @@ jobs:
           USER_NAME: ${{ secrets.EC2_USER }}
           REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
           REGISTRY_USER: ${{ github.actor }}
-          # Truyền trực tiếp tên Image vào bước deploy để chắc chắn
         run: |
           mkdir -p ~/.ssh
-          printf "%s\n" "$PRIVATE_KEY" > ~/.ssh/id_rsa
+          echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
+          # Chuẩn bị tên Image viết thường
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          B_IMAGE="${{ env.REGISTRY }}/${REPO}-backend:latest"
+          IMAGE_TAG="ghcr.io/${REPO}-backend:latest"
           
           echo "📡 Kết nối tới $HOSTNAME..."
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
+          # Kiểm tra kết nối trước
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app" || (echo "❌ Không thể kết nối SSH. Vui lòng Reboot server nếu bị treo!" && exit 1)
           
-          echo "📤 Đang chuyển file .env và docker-compose..."
+          echo "📤 Đăng chuyển file cấu hình..."
           scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << EOF
+          echo "⚙️ Bắt đầu thực thi lệnh trên Server..."
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME env BACKEND_IMAGE=$IMAGE_TAG REGISTRY_USER=$REGISTRY_USER REGISTRY_PASSWORD=$REGISTRY_PASSWORD 'bash -s' << 'EOF'
+            set -e
             cd ~/app
             
-            # 1. Tắt mọi thứ để giải phóng RAM (Cực kỳ quan trọng với t2.micro)
-            echo "🧹 Giải phóng RAM: Tắt toàn bộ dịch vụ cũ..."
-            sudo docker compose down --remove-orphans
-            
-            # 2. Xóa các image cũ và cache để tránh đầy ổ cứng
+            # 1. Giải phóng RAM tuyệt đối
+            echo "🧹 Dọn dẹp RAM: Tắt toàn bộ hệ thống..."
+            sudo docker compose down --remove-orphans || true
             sudo docker system prune -f
             
-            # 3. Đăng nhập và Pull Image (Từng bước để tránh nghẽn I/O)
+            # 2. Đăng nhập và Pull (Dùng biến đã truyền qua env)
             echo "$REGISTRY_PASSWORD" | sudo docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
-            echo "📥 Đang tải Image mới: $B_IMAGE"
-            BACKEND_IMAGE=$B_IMAGE sudo docker compose pull
+            echo "📥 Đang tải Image mới: $BACKEND_IMAGE"
+            sudo docker compose pull
             
-            # 4. KHỞI ĐỘNG TUẦN TỰ (Sequential Startup)
-            
-            echo "🛢️ 1. Khởi động Database & Redis..."
-            BACKEND_IMAGE=$B_IMAGE sudo docker compose up -d db redis
-            sleep 15
-            
-            echo "🔄 2. Chạy Migration (Chạy xong rồi xóa container ngay để tiết kiệm RAM)..."
-            BACKEND_IMAGE=$B_IMAGE sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Migration có cảnh báo."
-            sleep 5
-            
-            echo "⚙️ 3. Khởi động Backend..."
-            BACKEND_IMAGE=$B_IMAGE sudo docker compose up -d backend
+            # 3. Khởi động THẬT CHẬM để tránh treo CPU
+            echo "� 1. Khởi động Database & Redis..."
+            sudo docker compose up -d db redis
+            echo "⏳ Nghỉ 20 giây đợi DB..."
             sleep 20
             
-            echo "🤖 4. Khởi động Telegram Bot & Worker..."
-            BACKEND_IMAGE=$B_IMAGE sudo docker compose up -d telegram_bot celery_worker celery_beat
+            echo "🔄 2. Chạy Migration..."
+            sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Migration có thể đã chạy rồi."
             
-            echo "✅ KIỂM TRA TÀI NGUYÊN:"
-            free -m
+            echo "⚙️ 3. Khởi động Backend (Nặng nhất)..."
+            sudo docker compose up -d backend
+            echo "⏳ Nghỉ 30 giây để nạp thư viện Pandas..."
+            sleep 30
+            
+            echo "🤖 4. Khởi động các dịch vụ còn lại..."
+            sudo docker compose up -d telegram_bot celery_worker celery_beat
+            
+            echo "✅ Kiểm tra trạng thái cuối:"
             sudo docker compose ps
-            
-            echo "✨ DEPLOY HOÀN TẤT NHẸ NHÀNG!"
+            free -m
             sudo docker logout ghcr.io
+            echo "🚀 DEPLOY HOÀN TẤT!"
           EOF
