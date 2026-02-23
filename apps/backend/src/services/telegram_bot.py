@@ -25,8 +25,11 @@ class TelegramService:
         target_chat_id = chat_id or settings.TELEGRAM_CHAT_ID
         
         if not token or not target_chat_id:
-            logger.error("Telegram token hoặc chat_id chưa được cấu hình.")
+            logger.error(f"Telegram token hoặc chat_id chưa được cấu hình. Token: {'Có' if token else 'Không'}, ChatID: {'Có' if target_chat_id else 'Không'}")
             return False
+        
+        # Log debug (ẩn bớt thông tin nhạy cảm)
+        logger.info(f"Đang gửi tin nhắn Telegram tới ChatID: {str(target_chat_id)[:4]}****")
             
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {

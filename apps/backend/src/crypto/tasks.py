@@ -119,7 +119,11 @@ def send_periodic_report():
     db = get_session_local()()
     try:
         data = CryptoScraperService.get_prices()
-        if not data: return
+        if not data:
+            logger.warning("⚠️ Báo cáo định kỳ: Không lấy được giá từ OKX.")
+            return
+
+        logger.info(f"📈 Đã lấy được giá của {len(data)} đồng coin. Đang tính toán gợi ý...")
 
         message = "<b>📋 BÁO CÁO THỊ TRƯỜNG ĐỊNH KỲ</b>\n"
         message += f"<code>⏱ {datetime.now().strftime('%H:%M | %d/%m/%Y')}</code>\n"
@@ -134,10 +138,14 @@ def send_periodic_report():
             message += f"┗ 💡 {suggestion}\n"
             message += "──────────────────\n"
 
-        TelegramService.send_message(message)
-        logger.info("✅ Đã gửi báo cáo định kỳ thành công.")
+        success = TelegramService.send_message(message)
+        if success:
+            logger.info("✅ Đã gửi báo cáo định kỳ đến Telegram thành công.")
+        else:
+            logger.error("❌ Thất bại khi gửi báo cáo định kỳ qua Telegram Service.")
+            
     except Exception as e:
-        logger.error(f"❌ Lỗi gửi báo cáo định kỳ: {e}")
+        logger.error(f"❌ Lỗi nghiêm trọng trong task gửi báo cáo định kỳ: {e}", exc_info=True)
     finally:
         db.close()
 
