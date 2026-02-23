@@ -50,41 +50,47 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup SSH and Deploy
-        env:
-          PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          HOSTNAME: ${{ secrets.EC2_HOST }}
-          USER_NAME: ${{ secrets.EC2_USER }}
+      - name: Create .env file
         run: |
-          # 1. Setup SSH
-          mkdir -p ~/.ssh
-          printf "%s" "$PRIVATE_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H $HOSTNAME >> ~/.ssh/known_hosts || true
-          
-          # 2. Tạo file .env bằng printf (an toàn nhất cho YAML)
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          printf "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest\n" > .env
-          printf "POSTGRES_USER=${{ secrets.POSTGRES_USER }}\n" >> .env
-          printf "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}\n" >> .env
-          printf "POSTGRES_DB=${{ secrets.POSTGRES_DB }}\n" >> .env
-          printf "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}\n" >> .env
-          printf "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}\n" >> .env
-          printf "SECRET_KEY=${{ secrets.SECRET_KEY }}\n" >> .env
-          printf "ENVIRONMENT=production\n" >> .env
+          echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest" > .env
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}" >> .env
+          echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
+          echo "ENVIRONMENT=production" >> .env
+          echo "PYTHONPATH=/app" >> .env
 
-          # 3. Deploy
-          echo "🚀 Đang deploy tới $HOSTNAME..."
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
-          
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
-            mkdir -p ~/app
+      - name: Copy files to EC2
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: ".env,docker-compose.yml"
+          target: "~/app"
+
+      - name: Execute remote ssh commands
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
             cd ~/app
+            echo "📥 Kéo image mới nhất..."
             docker compose pull
+            echo "🐘 Khởi động DB và Redis..."
             docker compose up -d db redis
+            echo "⏳ Đợi DB sẵn sàng..."
             sleep 15
+            echo "🔄 Chạy database migration..."
+            # Khởi động backend tạm thời để chạy migration
             docker compose run --rm backend alembic upgrade head
+            echo "🚀 Khởi động tất cả dịch vụ..."
             docker compose up -d
+            echo "🧹 Dọn dẹp tài nguyên cũ..."
             docker image prune -f
-            echo "✅ DEPLOY SUCCESSFUL!"
-          EOF
+            echo "✅ DEPLOY THÀNH CÔNG!"
