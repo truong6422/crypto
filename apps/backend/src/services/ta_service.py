@@ -31,13 +31,16 @@ class TechnicalAnalysisService:
         try:
             # 1. Chuyển đổi sang DataFrame
             df = pd.DataFrame(history_data)
-            df['close'] = df['price'].astype(float) # Đổi tên price thành close
+            if 'close' not in df.columns and 'price' in df.columns:
+                df['close'] = df['price'].astype(float)
+            
+            df['close'] = df['close'].astype(float)
             df = df.sort_values('timestamp')
 
             # 2. Tính toán RSI (chu kỳ 14)
             df.ta.rsi(length=14, append=True)
             
-            # 3. Tính toán MACD (12, 26, 信号9)
+            # 3. Tính toán MACD (12, 26, signal 9)
             df.ta.macd(fast=12, slow=26, signal=9, append=True)
             
             # 4. Tính toán Bollinger Bands (20, 2)

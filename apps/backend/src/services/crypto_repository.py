@@ -158,15 +158,15 @@ class CryptoRepository:
                 reasons.append("Xu hướng ngày Giảm")
 
         # --- Kết luận dựa trên điểm ---
-        status = "⚪ NEUTRAL"
+        status = "⚪ TRUNG LẬP"
         if score >= 4:
-            status = "🔥 STRONG BUY"
+            status = "🔥 MUA MẠNH"
         elif score >= 2:
-            status = "🟢 BUY"
+            status = "🟢 MUA"
         elif score <= -4:
-            status = "💀 STRONG SELL"
+            status = "💀 BÁN MẠNH"
         elif score <= -2:
-            status = "🔴 SELL"
+            status = "🔴 BÁN"
 
-        ta_info = f" [Score: {score:+} | {', '.join(reasons[:2])}]"
-        return f"<b>{status}</b>{ta_info}"
+        reasons_text = f" | {', '.join(reasons[:2])}" if reasons else ""
+        return f"<b>{status}</b> [Điểm: {score:+} {reasons_text}]"
