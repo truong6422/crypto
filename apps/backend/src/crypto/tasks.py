@@ -28,7 +28,12 @@ def backfill_historical_data(symbol: str = None):
                 logger.info(f"⏳ Backfill 300 nến 1m cho {s}...")
                 candles = CryptoScraperService.get_historical_candles(s, bar="1m", limit=300)
                 for c in candles:
-                    db.add(CryptoHistory(symbol=s, price=c["price"], timestamp=c["timestamp"]))
+                    db.add(CryptoHistory(
+                        symbol=s, 
+                        open=c["open"], high=c["high"], low=c["low"], 
+                        close=c["close"], volume=c["volume"], 
+                        timestamp=c["timestamp"]
+                    ))
                 db.commit()
                 time.sleep(2) # Nghỉ để không bị rate limit
             
@@ -38,7 +43,12 @@ def backfill_historical_data(symbol: str = None):
                 logger.info(f"⏳ Backfill 100 nến 1D cho {s}...")
                 candles = CryptoScraperService.get_historical_candles(s, bar="1D", limit=100)
                 for c in candles:
-                    db.add(CryptoDaily(symbol=s, price=c["price"], timestamp=c["timestamp"]))
+                    db.add(CryptoDaily(
+                        symbol=s, 
+                        open=c["open"], high=c["high"], low=c["low"], 
+                        close=c["close"], volume=c["volume"], 
+                        timestamp=c["timestamp"]
+                    ))
                 db.commit()
                 time.sleep(2)
                 
@@ -56,27 +66,31 @@ def update_daily_candles():
         for s in CryptoAssets.DEFAULT_IDS:
             candles = CryptoScraperService.get_historical_candles(s, bar="1D", limit=1)
             if candles:
-                CryptoRepository.save_price(db, s, candles[0]["price"], timeframe="1D", timestamp=candles[0]["timestamp"])
-        logger.info("✅ Đã cập nhật nến ngày cho các tài sản.")
+                c = candles[0]
+                CryptoRepository.save_price(
+                    db, s, c["close"], timeframe="1D", timestamp=c["timestamp"],
+                    open_p=c["open"], high=c["high"], low=c["low"], volume=c["volume"]
+                )
+        logger.info("✅ Đã cập nhật nến ngày OHLCV cho các tài sản.")
     finally:
         db.close()
 
 @celery_app.task
 def crawl_and_save_prices():
-    """Task tự động lấy giá crypto, lưu vào database và cảnh báo biến động."""
+    """Crawl giá từ OKX, lưu vào DB và gửi cảnh báo nếu biến động mạnh."""
     # Đảm bảo có dữ liệu lịch sử trước khi crawl bản ghi mới
     backfill_historical_data.delay()
     
     logger.info("🚀 Celery Task: Bắt đầu crawl giá crypto...")
-    
     db = get_session_local()()
+    
     try:
         # 1. Lấy dữ liệu từ OKX
         data = CryptoScraperService.get_prices()
         if not data:
-            logger.warning("⚠️ Không lấy được dữ liệu từ OKX")
+            logger.warning("⚠️ Không lấy được dữ liệu từ OKX.")
             return
-            
+
         # 2. Xử lý từng đồng coin
         for coin in data:
             symbol = coin.get("instId")
@@ -101,8 +115,6 @@ def crawl_and_save_prices():
                     TelegramService.send_message(alert_msg)
                     logger.info(f"🔔 Đã gửi cảnh báo biến động cho {symbol}: {diff_pct:+.2f}%")
             
-            # 3. Lưu vào database
-            CryptoRepository.save_price(db, symbol, current_price)
             logger.info(f"✅ Đã lưu giá {symbol}: ${current_price:,.2f}")
             
         logger.info(f"✨ Đã crawl và kiểm tra xong {len(data)} đồng coin.")

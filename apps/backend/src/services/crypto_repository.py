@@ -12,20 +12,20 @@ class CryptoRepository:
     """Xử lý các thao tác database cho Crypto."""
 
     @staticmethod
-    def save_price(db: Session, symbol: str, price: float, timeframe: str = "1m", timestamp: datetime = None):
-        """Lưu giá mới vào lịch sử."""
-        if timeframe == "1D":
-            db_history = CryptoDaily(
-                symbol=symbol, 
-                price=price, 
-                timestamp=timestamp if timestamp else datetime.utcnow()
-            )
-        else:
-            db_history = CryptoHistory(
-                symbol=symbol, 
-                price=price, 
-                timestamp=timestamp if timestamp else datetime.utcnow()
-            )
+    def save_price(db: Session, symbol: str, price: float, timeframe: str = "1m", timestamp: datetime = None, 
+                   open_p: float = None, high: float = None, low: float = None, volume: float = None):
+        """Lưu nến mới vào lịch sử."""
+        model = CryptoDaily if timeframe == "1D" else CryptoHistory
+        
+        db_history = model(
+            symbol=symbol, 
+            open=open_p if open_p else price,
+            high=high if high else price,
+            low=low if low else price,
+            close=price,
+            volume=volume if volume else 0,
+            timestamp=timestamp if timestamp else datetime.utcnow()
+        )
         db.add(db_history)
         db.commit()
         db.refresh(db_history)
@@ -33,19 +33,19 @@ class CryptoRepository:
 
     @staticmethod
     def get_last_price(db: Session, symbol: str, timeframe: str = "1m") -> float:
-        """Lấy giá gần nhất trong database theo khung thời gian."""
+        """Lấy giá gần nhất."""
         model = CryptoDaily if timeframe == "1D" else CryptoHistory
         last_record = db.query(model).filter(
             model.symbol == symbol
         ).order_by(model.timestamp.desc()).first()
-        return float(last_record.price) if last_record else 0.0
+        return float(last_record.close) if last_record else 0.0
 
     @staticmethod
     def get_average_price(db: Session, symbol: str, hours: int = 24, timeframe: str = "1m"):
-        """Tính giá trung bình trong X giờ qua theo khung thời gian."""
+        """Tính giá trung bình."""
         model = CryptoDaily if timeframe == "1D" else CryptoHistory
         since = datetime.utcnow() - timedelta(hours=hours)
-        avg_price = db.query(func.avg(model.price)).filter(
+        avg_price = db.query(func.avg(model.close)).filter(
             model.symbol == symbol,
             model.timestamp >= since
         ).scalar()
@@ -53,12 +53,12 @@ class CryptoRepository:
 
     @staticmethod
     def get_price_stats(db: Session, symbol: str, hours: int = 24, timeframe: str = "1m"):
-        """Lấy giá cao nhất và thấp nhất trong X giờ qua."""
+        """Lấy giá cao nhất và thấp nhất."""
         model = CryptoDaily if timeframe == "1D" else CryptoHistory
         since = datetime.utcnow() - timedelta(hours=hours)
         stats = db.query(
-            func.max(model.price).label("max_price"),
-            func.min(model.price).label("min_price")
+            func.max(model.high).label("max_price"),
+            func.min(model.low).label("min_price")
         ).filter(
             model.symbol == symbol,
             model.timestamp >= since
@@ -88,56 +88,85 @@ class CryptoRepository:
 
     @staticmethod
     def get_recent_history(db: Session, symbol: str, limit: int = 100, timeframe: str = "1m"):
-        """Lấy danh sách lịch sử giá gần nhất theo khung thời gian."""
+        """Lấy danh sách nến (OHLCV) gần nhất."""
         model = CryptoDaily if timeframe == "1D" else CryptoHistory
         records = db.query(model).filter(
             model.symbol == symbol
         ).order_by(model.timestamp.desc()).limit(limit).all()
         
         return [
-            {"price": r.price, "timestamp": r.timestamp} 
+            {
+                "open": r.open,
+                "high": r.high,
+                "low": r.low,
+                "close": r.close,
+                "volume": r.volume,
+                "timestamp": r.timestamp
+            } 
             for r in reversed(records)
         ]
             
     @staticmethod
     def get_investment_suggestion(db: Session, symbol: str, current_price: float):
         """
-        Đưa ra gợi ý đầu tư thông minh dựa trên RSI, MACD và Bollinger Bands (1m).
-        Kết hợp xu hướng dài hạn (1D).
+        Đưa ra gợi ý dựa trên Signal Scoring System (Điểm số tín hiệu).
         """
-        # 1. Tính toán TA ngắn hạn (1m)
+        # 1. Lấy dữ liệu 1m và 1D
         history_1m = CryptoRepository.get_recent_history(db, symbol, limit=100, timeframe="1m")
+        history_1d = CryptoRepository.get_recent_history(db, symbol, limit=30, timeframe="1D")
+        
         ta_1m = TechnicalAnalysisService.calculate_indicators(history_1m)
+        ta_1d = TechnicalAnalysisService.calculate_indicators(history_1d)
         
-        # 2. Lấy xu hướng dài hạn (1D)
-        last_price_1d = CryptoRepository.get_last_price(db, symbol, timeframe="1D")
-        trend_1d = ""
-        if last_price_1d > 0:
-            change_1d = ((current_price - last_price_1d) / last_price_1d) * 100
-            trend_1d = f" | Ngày: {'📈' if change_1d > 0 else '📉'} {change_1d:+.1f}%"
+        score = 0
+        reasons = []
 
-        rsi = ta_1m.get("rsi")
+        # --- Tín hiệu RSI (1m) ---
+        rsi_1m = ta_1m.get("rsi")
+        if rsi_1m:
+            if rsi_1m < 30:
+                score += 2
+                reasons.append(f"RSI Quá bán ({rsi_1m:.1f})")
+            elif rsi_1m < 40:
+                score += 1
+                reasons.append("RSI Thấp")
+            elif rsi_1m > 70:
+                score -= 2
+                reasons.append(f"RSI Quá mua ({rsi_1m:.1f})")
+            elif rsi_1m > 60:
+                score -= 1
+                reasons.append("RSI Cao")
+
+        # --- Tín hiệu Bollinger Bands (1m) ---
         bb = ta_1m.get("bbands")
-        macd = ta_1m.get("macd")
+        if bb:
+            if current_price <= bb["lower"]:
+                score += 2
+                reasons.append("Chạm đáy BB")
+            elif current_price >= bb["upper"]:
+                score -= 2
+                reasons.append("Chạm đỉnh BB")
 
-        # 3. Logic gợi ý đa chỉ số
-        suggestion = "⚪ Trạng thái: THEO DÕI"
-        
-        if rsi and rsi < 30:
-            if bb and current_price <= bb["lower"]:
-                suggestion = "🔥 Gợi ý: MUA MẠNH (Đáy Bollinger)"
-            else:
-                suggestion = "🟢 Gợi ý: NÊN MUA (RSI thấp)"
-        elif rsi and rsi > 70:
-            if bb and current_price >= bb["upper"]:
-                suggestion = "🔴 Gợi ý: NÊN CHỐT LỜI (Đỉnh Bollinger)"
-            else:
-                suggestion = "⚠️ Gợi ý: CẨN TRỌNG (RSI cao)"
-        elif macd and macd["hist"]:
-            if macd["hist"] > 0 and macd["value"] > macd["signal"]:
-                suggestion = "📈 Xu hướng: TĂNG TRƯỞNG"
-            elif macd["hist"] < 0 and macd["value"] < macd["signal"]:
-                suggestion = "📉 Xu hướng: GIẢM GIÁ"
+        # --- Xu hướng nến ngày (1D) ---
+        rsi_1d = ta_1d.get("rsi")
+        if rsi_1d:
+            if rsi_1d > 55:
+                score += 1
+                reasons.append("Xu hướng ngày Tăng")
+            elif rsi_1d < 45:
+                score -= 1
+                reasons.append("Xu hướng ngày Giảm")
 
-        ta_info = f" [RSI: {rsi:.1f}]" if rsi else ""
-        return f"{suggestion}{ta_info}{trend_1d}"
+        # --- Kết luận dựa trên điểm ---
+        status = "⚪ NEUTRAL"
+        if score >= 4:
+            status = "🔥 STRONG BUY"
+        elif score >= 2:
+            status = "🟢 BUY"
+        elif score <= -4:
+            status = "💀 STRONG SELL"
+        elif score <= -2:
+            status = "🔴 SELL"
+
+        ta_info = f" [Score: {score:+} | {', '.join(reasons[:2])}]"
+        return f"<b>{status}</b>{ta_info}"

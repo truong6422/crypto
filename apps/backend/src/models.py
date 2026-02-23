@@ -115,26 +115,34 @@ class UserProfile(Base):
 
 
 class CryptoHistory(Base):
-    """Lưu trữ lịch sử giá crypto theo phút (1m)."""
+    """Lưu trữ nến 1 phút (1m) đầy đủ OHLCV."""
     __tablename__ = "crypto_history"
 
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String(50), index=True, nullable=False)
-    price = Column(Float, nullable=False)
+    open = Column(Float, nullable=True)
+    high = Column(Float, nullable=True)
+    low = Column(Float, nullable=True)
+    close = Column(Float, nullable=False) # Đây là cột price cũ
+    volume = Column(Float, nullable=True)
     timestamp = Column(DateTime, default=func.now(), nullable=False)
 
     def __repr__(self):
-        return f"<CryptoHistory(symbol='{self.symbol}', price={self.price})>"
+        return f"<CryptoHistory(symbol='{self.symbol}', close={self.close})>"
 
 
 class CryptoDaily(Base):
-    """Lưu trữ lịch sử giá crypto theo ngày (1D)."""
+    """Lưu trữ nến ngày (1D) đầy đủ OHLCV."""
     __tablename__ = "crypto_daily"
 
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String(50), index=True, nullable=False)
-    price = Column(Float, nullable=False)
+    open = Column(Float, nullable=True)
+    high = Column(Float, nullable=True)
+    low = Column(Float, nullable=True)
+    close = Column(Float, nullable=False)
+    volume = Column(Float, nullable=True)
     timestamp = Column(DateTime, nullable=False)
 
     def __repr__(self):
-        return f"<CryptoDaily(symbol='{self.symbol}', price={self.price})>"
+        return f"<CryptoDaily(symbol='{self.symbol}', close={self.close})>"

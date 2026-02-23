@@ -64,15 +64,18 @@ class CryptoScraperService:
             data = response.json().get("data", [])
             
             # OKX returns [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
-            # Ta chỉ cần ts và close
             formatted_data = []
             for candle in data:
                 formatted_data.append({
                     "timestamp": datetime.fromtimestamp(int(candle[0]) / 1000),
-                    "price": float(candle[4])
+                    "open": float(candle[1]),
+                    "high": float(candle[2]),
+                    "low": float(candle[3]),
+                    "close": float(candle[4]),
+                    "volume": float(candle[5])
                 })
             
-            # API trả về từ mới đến cũ, ta cần đảo ngược lại để lưu vào DB theo thứ tự
+            # API trả về từ mới đến cũ, ta cần đảo ngược lại
             return formatted_data[::-1]
             
         except Exception as e:
