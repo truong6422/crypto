@@ -50,60 +50,51 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🔍 DEBUG Connectivity
-        env:
-          HOSTNAME: ${{ secrets.EC2_HOST }}
-          USER_NAME: ${{ secrets.EC2_USER }}
-          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+      - name: Create .env file from Single Secret
         run: |
-          echo "Checking Port 22 on $HOSTNAME..."
-          nc -zv -w5 $HOSTNAME 22 || echo "❌ PORT 22 KHÔNG THÔNG!"
+          # 1. Ghi toàn bộ nội dung từ secret ENV_CONFIG vào file
+          echo "${{ secrets.ENV_CONFIG }}" > .env
           
-          if [[ "$SSH_KEY" != *"BEGIN"* ]]; then
-            echo "❌ CẢNH BÁO: Private Key dán vào Secret đang bị SAI định dạng (thiếu Header BEGIN)!"
-          fi
-          
-          echo "Key First Line: $(echo "$SSH_KEY" | head -n 1)"
-
-      - name: Create .env file
-        run: |
+          # 2. Tự động thêm/cập nhật BACKEND_IMAGE (để bạn không cần quan tâm phần này)
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          {
-            echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest"
-            echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}"
-            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}"
-            echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}"
-            echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}"
-            echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}"
-            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}"
-            echo "ENVIRONMENT=production"
-            echo "PYTHONPATH=/app"
-          } > .env
+          sed -i '/BACKEND_IMAGE/d' .env 
+          echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest" >> .env
+          
+          # 3. Đảm bảo PYTHONPATH luôn đúng
+          echo "PYTHONPATH=/app" >> .env
 
-      - name: 🚀 Deploy via standard SSH Command
+      - name: 🚀 Final Deploy via Native SSH
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOSTNAME: ${{ secrets.EC2_HOST }}
           USER_NAME: ${{ secrets.EC2_USER }}
         run: |
           mkdir -p ~/.ssh
-          echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
+          printf "%s\n" "$PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          echo "Checking connection..."
+          echo "📡 Kết nối tới $HOSTNAME..."
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
           
-          echo "Copying files..."
+          echo "📤 Đang chuyển file .env và docker-compose..."
           scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
-          echo "Running remote commands..."
+          echo "⚙️ Đang thực thi lệnh trên Server..."
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME << 'EOF'
             cd ~/app
+            
+            # Kiểm tra Docker
+            if ! [ -x "$(command -v docker)" ]; then
+              sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
+              sudo usermod -aG docker $USER
+            fi
+
             sudo docker compose pull
             sudo docker compose up -d db redis
-            sleep 10
+            echo "Đang đợi DB khởi động..."
+            sleep 15
             sudo docker compose run --rm backend alembic upgrade head
             sudo docker compose up -d
             sudo docker image prune -f
-            echo "✅ DEPLOY TỪ LỆNH GỐC THÀNH CÔNG!"
+            echo "✨ DEPLOY THÀNH CÔNG!"
           EOF
