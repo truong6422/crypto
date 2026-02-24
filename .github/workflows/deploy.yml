@@ -1,139 +1,113 @@
-name: Deploy to EC2
+name: Deploy to EC2 (Optimized)
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-
 jobs:
-  build-and-push:
+  build-and-package:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Lowercase repo name
         run: |
-          echo "IMAGE_NAME=${{ env.REGISTRY }}/$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')-backend" >> $GITHUB_ENV
+          echo "REPO_NAME=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]' | cut -d'/' -f2)" >> $GITHUB_ENV
+          echo "IMAGE_TAG=crypto-backend:latest" >> $GITHUB_ENV
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
-
-      - name: Build and push Docker image
+      - name: Build Docker image locally
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          load: true # Load image vào docker local của GitHub Runner thay vì push
+          tags: ${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save and Compress Docker image
+        run: |
+          echo "📦 Đang nén Image..."
+          docker save ${{ env.IMAGE_TAG }} | gzip > backend_image.tar.gz
+          echo "✅ Đã nén thành backend_image.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: backend_image.tar.gz
+          retention-days: 1
 
   deploy:
-    needs: build-and-push
+    needs: build-and-package
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create .env file from Single Secret
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Create .env file
         run: |
           echo "${{ secrets.ENV_CONFIG }}" > .env
-          REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          sed -i '/BACKEND_IMAGE/d' .env 
-          echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${REPO}-backend:latest" >> .env
+          echo "BACKEND_IMAGE=crypto-backend:latest" >> .env
           echo "PYTHONPATH=/app" >> .env
 
-      - name: 🚀 Final Deploy via Native SSH
+      - name: 🚀 Final Deploy via Docker Load
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOSTNAME: ${{ secrets.EC2_HOST }}
           USER_NAME: ${{ secrets.EC2_USER }}
-          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-          REGISTRY_USER: ${{ github.actor }}
         run: |
           mkdir -p ~/.ssh
           echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Chuẩn bị tên Image viết thường
-          REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          IMAGE_TAG="ghcr.io/${REPO}-backend:latest"
-          
-          echo "📡 Kết nối tới $HOSTNAME..."
-          # Kiểm tra kết nối trước
-          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app" || (echo "❌ Không thể kết nối SSH. Vui lòng Reboot server nếu bị treo!" && exit 1)
-          
-          echo "📤 Đăng chuyển file cấu hình..."
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
+          echo "📡 Kết nối và chuẩn bị thư mục..."
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
+
+          echo "📤 Đang đẩy Image và cấu hình lên Server (Sử dụng SCP)..."
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa backend_image.tar.gz .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
           echo "⚙️ Bắt đầu thực thi lệnh trên Server..."
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME env BACKEND_IMAGE=$IMAGE_TAG REGISTRY_USER=$REGISTRY_USER REGISTRY_PASSWORD=$REGISTRY_PASSWORD 'bash -s' << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME 'bash -s' << 'EOF'
             set -e
             cd ~/app
             
-            # 1. Kiểm tra Swap (Cực kỳ quan trọng cho server 1GB RAM)
-            FREE_SWAP=$(free -m | grep Swap | awk '{print $4}')
-            if [ "$FREE_SWAP" -le "100" ]; then
-                echo "⚠️ CẢNH BÁO: Server không có Swap hoặc Swap quá thấp ($FREE_SWAP MB)."
-                echo "Lời khuyên: Hãy chạy lệnh sau trên server để tạo 2GB Swap cứu đói RAM:"
-                echo "sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
-            fi
-
-            # 2. Giải phóng RAM tuyệt đối
-            echo "🧹 Dọn dẹp RAM: Tắt toàn bộ hệ thống..."
+            echo "📥 1. Nạp Image vào hệ thống (Docker Load)..."
+            # Giải nén và nạp image tuần tự để không tốn RAM
+            gunzip -c backend_image.tar.gz | sudo docker load
+            
+            echo "🧹 2. Dọn dẹp: Tắt hệ thống cũ & Xóa file nén..."
             sudo docker compose down --remove-orphans || true
-            sudo docker system prune -f
+            rm backend_image.tar.gz
             
-            # 3. Đăng nhập và Pull
-            echo "$REGISTRY_PASSWORD" | sudo docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
-            echo "📥 Đang tải Image mới: $BACKEND_IMAGE"
-            sudo docker compose pull
-            
-            # 4. Khởi động THẬT CHẬM để tránh treo CPU
-            echo "🗄️ 1. Khởi động Database & Redis..."
+            echo "🗄️ 3. Khởi động Database & Redis..."
             sudo docker compose up -d db redis
-            echo "⏳ Nghỉ 15 giây đợi DB..."
-            sleep 15
+            echo "⏳ Đợi 10s..."
+            sleep 10
             
-            echo "🔄 2. Chạy Migration..."
-            # Chạy Migration đơn lẻ để không tốn RAM chạy các service khác lúc này
+            echo "🔄 4. Chạy Migration..."
             sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Migration có thể đã chạy rồi."
             
-            echo "⚙️ 3. Khởi động Backend (Nạp Pandas)..."
+            echo "⚙️ 5. Khởi động Backend..."
             sudo docker compose up -d backend
-            echo "⏳ Nghỉ 40 giây để nạp thư viện cực nặng (Pandas, TA)..."
-            sleep 40
+            echo "⏳ Đợi nạp Pandas..."
+            sleep 30
             
-            echo "🤖 4. Khởi động Worker (Tiết kiệm RAM)..."
-            sudo docker compose up -d celery_worker
-            echo "⏳ Nghỉ 10 giây..."
-            sleep 10
-
-            echo "📡 5. Khởi động các dịch vụ còn lại..."
-            sudo docker compose up -d telegram_bot celery_beat
+            echo "🤖 6. Khởi động các dịch vụ còn lại..."
+            sudo docker compose up -d celery_worker telegram_bot celery_beat
             
-            echo "✅ Kiểm tra trạng thái cuối:"
-            sudo docker compose ps
-            free -m
-            sudo docker logout ghcr.io
+            echo "✅ Dọn dẹp rác..."
+            sudo docker system prune -f
+            
             echo "🚀 DEPLOY HOÀN TẤT!"
+            sudo docker compose ps
           EOF
