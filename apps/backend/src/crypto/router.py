@@ -43,3 +43,10 @@ async def crawl_and_notify(background_tasks: BackgroundTasks):
     crawl_and_save_prices.delay()
     send_periodic_report.delay()
     return {"message": "Đã kích hoạt các tác vụ ngầm để cập nhật giá và gửi báo cáo."}
+
+
+@router.get("/accuracy")
+async def get_accuracy(db: Session = Depends(get_db)):
+    """Lấy báo cáo độ chính xác của các dự đoán."""
+    report = CryptoRepository.get_accuracy_report(db)
+    return {"report": report}

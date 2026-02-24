@@ -1,6 +1,6 @@
 # Makefile for Crypto Base
 
-.PHONY: help run-bot run-backend run-frontend install bot dev makemigrations migrate run-worker run-beat run-flower
+.PHONY: help run-bot run-backend run-frontend install bot dev makemigrations migrate run-worker run-beat run-flower redis-restart
 
 help:
 	@echo "Các lệnh có sẵn:"
@@ -16,8 +16,12 @@ help:
 	@echo "  make run-frontend - Chạy React Frontend"
 	@echo "  make install      - Cài đặt dependencies cho toàn bộ dự án"
 
-dev:
+dev: redis-restart
 	@npx concurrently "make run-backend" "make run-bot" "make run-worker" "make run-beat" "make run-flower"
+
+redis-restart:
+	@echo "🔄 Đang khởi động lại Redis..."
+	@sudo systemctl restart redis-server
 
 makemigrations:
 	@cd apps/backend && ./venv/bin/python3 scripts/makemigrations.py
@@ -36,8 +40,8 @@ run-backend:
 	@cd apps/backend && ./venv/bin/python3 -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8001
 
 run-worker:
-	@echo "🚀 Đang khởi động Celery Worker..."
-	@cd apps/backend && PYTHONPATH=. ./venv/bin/celery -A src.celery_app:celery_app worker --loglevel=info
+	@echo "🚀 Đang khởi động Celery Worker (Lite Mode)..."
+	@cd apps/backend && PYTHONPATH=. ./venv/bin/celery -A src.celery_app:celery_app worker --loglevel=info --concurrency=1
 
 run-beat:
 	@echo "🚀 Đang khởi động Celery Beat..."
@@ -48,7 +52,7 @@ run-flower:
 	@cd apps/backend && PYTHONPATH=. ./venv/bin/celery -A src.celery_app:celery_app flower --port=5555
 
 run-frontend:
-	@echo "🚀 Đang khởi động Frontend..."
+	@echo "🚀 Đang khởi động Frontend (Vite Dev - Cảnh báo: Ngốn RAM)..."
 	@cd apps/frontend && npm run dev
 
 install:

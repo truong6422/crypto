@@ -130,6 +130,9 @@ class CryptoConfig:
     
     # Tần suất gửi báo cáo định kỳ (giây) - 10 phút = 600 giây
     REPORT_INTERVAL_SECONDS = 600.0
+    PREDICTION_INTERVAL_SECONDS = 60.0
+    VALIDATE_INTERVAL_SECONDS = 60.0
+    SIGNAL_VALIDATE_THRESHOLD_MINUTES = 1
     
     # Ngưỡng biến động giá để cảnh báo (%)
     VOLATILITY_THRESHOLD_PCT = 1.0

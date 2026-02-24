@@ -41,5 +41,13 @@ celery_app.conf.beat_schedule = {
     "update-daily-candles-every-hour": {
         "task": "src.crypto.tasks.update_daily_candles",
         "schedule": crontab(minute=0), # Chạy vào phút thứ 0 mỗi giờ
+    },
+    "validate-signals-every-1-minute": {
+        "task": "src.crypto.tasks.validate_signals_task",
+        "schedule": CryptoConfig.VALIDATE_INTERVAL_SECONDS,
+    },
+    "record-predictions-every-5-minutes": {
+        "task": "src.crypto.tasks.record_predictions_task",
+        "schedule": CryptoConfig.PREDICTION_INTERVAL_SECONDS,
     }
 }

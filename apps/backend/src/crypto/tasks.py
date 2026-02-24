@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 from src.celery_app import celery_app
 from src.database import get_session_local
@@ -6,6 +7,7 @@ from src.services.crypto_scraper import CryptoScraperService
 from src.services.crypto_repository import CryptoRepository
 from src.services.telegram_bot import TelegramService
 from src.constants import CryptoAssets, CryptoConfig
+from src.models import CryptoHistory, CryptoDaily
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +20,6 @@ def backfill_historical_data(symbol: str = None):
     db = get_session_local()()
     
     try:
-        from src.models import CryptoHistory, CryptoDaily
-        import time
-        
         for s in symbols:
             # 1. Backfill nến 1 phút (Để tính TA ngắn hạn)
             count_1m = db.query(CryptoHistory).filter(CryptoHistory.symbol == s).count()
@@ -176,5 +175,42 @@ def cleanup_old_prices():
         logger.info(f"✅ Đã xóa {count_1m} nến 1m và {count_1d} nến 1D cũ.")
     except Exception as e:
         logger.error(f"❌ Lỗi khi dọn dẹp dữ liệu: {e}")
+    finally:
+        db.close()
+
+
+@celery_app.task
+def validate_signals_task():
+    """Kiểm tra kết quả của các tín hiệu đã phát ra."""
+    logger.info("🔍 Celery Task: Bắt đầu đối soát kết quả tín hiệu...")
+    db = get_session_local()()
+    try:
+        count = CryptoRepository.validate_signals(db)
+        logger.info(f"✅ Đã đối soát xong {count} tín hiệu.")
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi đối soát tín hiệu: {e}")
+    finally:
+        db.close()
+
+
+@celery_app.task
+def record_predictions_task():
+    """Tự động phân tích và lưu tín hiệu mỗi 5 phút."""
+    logger.info("🤖 Celery Task: Bắt đầu tự động phân tích và ghi tín hiệu...")
+    db = get_session_local()()
+    try:
+        data = CryptoScraperService.get_prices()
+        if not data:
+            return
+
+        for coin in data:
+            symbol = coin.get("instId")
+            price = float(coin.get("last", 0))
+            # Hàm này đã bao gồm logic record_signal bên trong
+            CryptoRepository.get_investment_suggestion(db, symbol, price)
+            
+        logger.info("✅ Hoàn tất lượt tự động phân tích.")
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi tự động phân tích tín hiệu: {e}")
     finally:
         db.close()

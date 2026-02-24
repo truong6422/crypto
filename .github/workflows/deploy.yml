@@ -90,32 +90,46 @@ jobs:
             set -e
             cd ~/app
             
-            # 1. Giải phóng RAM tuyệt đối
+            # 1. Kiểm tra Swap (Cực kỳ quan trọng cho server 1GB RAM)
+            FREE_SWAP=$(free -m | grep Swap | awk '{print $4}')
+            if [ "$FREE_SWAP" -le "100" ]; then
+                echo "⚠️ CẢNH BÁO: Server không có Swap hoặc Swap quá thấp ($FREE_SWAP MB)."
+                echo "Lời khuyên: Hãy chạy lệnh sau trên server để tạo 2GB Swap cứu đói RAM:"
+                echo "sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
+            fi
+
+            # 2. Giải phóng RAM tuyệt đối
             echo "🧹 Dọn dẹp RAM: Tắt toàn bộ hệ thống..."
             sudo docker compose down --remove-orphans || true
             sudo docker system prune -f
             
-            # 2. Đăng nhập và Pull (Dùng biến đã truyền qua env)
+            # 3. Đăng nhập và Pull
             echo "$REGISTRY_PASSWORD" | sudo docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
             echo "📥 Đang tải Image mới: $BACKEND_IMAGE"
             sudo docker compose pull
             
-            # 3. Khởi động THẬT CHẬM để tránh treo CPU
-            echo "� 1. Khởi động Database & Redis..."
+            # 4. Khởi động THẬT CHẬM để tránh treo CPU
+            echo "🗄️ 1. Khởi động Database & Redis..."
             sudo docker compose up -d db redis
-            echo "⏳ Nghỉ 20 giây đợi DB..."
-            sleep 20
+            echo "⏳ Nghỉ 15 giây đợi DB..."
+            sleep 15
             
             echo "🔄 2. Chạy Migration..."
+            # Chạy Migration đơn lẻ để không tốn RAM chạy các service khác lúc này
             sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Migration có thể đã chạy rồi."
             
-            echo "⚙️ 3. Khởi động Backend (Nặng nhất)..."
+            echo "⚙️ 3. Khởi động Backend (Nạp Pandas)..."
             sudo docker compose up -d backend
-            echo "⏳ Nghỉ 30 giây để nạp thư viện Pandas..."
-            sleep 30
+            echo "⏳ Nghỉ 40 giây để nạp thư viện cực nặng (Pandas, TA)..."
+            sleep 40
             
-            echo "🤖 4. Khởi động các dịch vụ còn lại..."
-            sudo docker compose up -d telegram_bot celery_worker celery_beat
+            echo "🤖 4. Khởi động Worker (Tiết kiệm RAM)..."
+            sudo docker compose up -d celery_worker
+            echo "⏳ Nghỉ 10 giây..."
+            sleep 10
+
+            echo "📡 5. Khởi động các dịch vụ còn lại..."
+            sudo docker compose up -d telegram_bot celery_beat
             
             echo "✅ Kiểm tra trạng thái cuối:"
             sudo docker compose ps

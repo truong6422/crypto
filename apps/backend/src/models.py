@@ -125,7 +125,7 @@ class CryptoHistory(Base):
     low = Column(Float, nullable=True)
     close = Column(Float, nullable=False) # Đây là cột price cũ
     volume = Column(Float, nullable=True)
-    timestamp = Column(DateTime, default=func.now(), nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def __repr__(self):
         return f"<CryptoHistory(symbol='{self.symbol}', close={self.close})>"
@@ -146,3 +146,22 @@ class CryptoDaily(Base):
 
     def __repr__(self):
         return f"<CryptoDaily(symbol='{self.symbol}', close={self.close})>"
+
+
+class TradingSignal(Base):
+    """Theo dõi các tín hiệu để tính tỷ lệ thắng (Win Rate)."""
+    __tablename__ = "trading_signals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(50), index=True, nullable=False)
+    signal_type = Column(String(20), nullable=False) # BUY, SELL
+    score = Column(Integer, nullable=False)
+    entry_price = Column(Float, nullable=False)
+    exit_price = Column(Float, nullable=True)
+    status = Column(String(20), default="PENDING") # PENDING, COMPLETED
+    result = Column(String(20), nullable=True) # WIN, LOSS, DRAW
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    closed_at = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<TradingSignal(symbol='{self.symbol}', type='{self.signal_type}', result={self.result})>"

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý lệnh /start"""
-    await update.message.reply_text("Bot đã sẵn sàng! Các lệnh có sẵn:\n/crypto - Xem giá crypto (OKX)\nping - Kiểm tra kết nối")
+    await update.message.reply_text("Bot đã sẵn sàng! Các lệnh có sẵn:\n/crypto - Xem giá crypto (OKX)\n/check - Xem tỷ lệ thắng của Robot\nping - Kiểm tra kết nối")
 
 async def get_crypto_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý lệnh /crypto"""
@@ -94,6 +94,20 @@ async def get_crypto_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Lỗi khi xử lý lệnh /crypto: {e}")
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
+async def accuracy_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý lệnh /check để xem độ chính xác tín hiệu."""
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8001")
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{backend_url}/api/crypto/accuracy", timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            report = data.get("report", "Không có dữ liệu báo cáo.")
+            await update.message.reply_text(report, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Lỗi khi xử lý lệnh /check: {e}")
+        await update.message.reply_text("❌ Không thể lấy dữ liệu thống kê từ hệ thống.")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý tin nhắn văn bản"""
     text = update.message.text.lower().strip()
@@ -116,10 +130,12 @@ if __name__ == '__main__':
     # Handlers
     start_handler = CommandHandler('start', start)
     crypto_handler = CommandHandler('crypto', get_crypto_prices)
+    check_handler = CommandHandler('check', accuracy_check)
     msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message)
     
     application.add_handler(start_handler)
     application.add_handler(crypto_handler)
+    application.add_handler(check_handler)
     application.add_handler(msg_handler)
     
     application.run_polling()

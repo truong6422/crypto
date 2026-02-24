@@ -2,7 +2,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, delete
 from datetime import datetime, timedelta
-from ..models import CryptoHistory, CryptoDaily
+from ..models import CryptoHistory, CryptoDaily, TradingSignal
+from ..constants import CryptoConfig
 import logging
 from .ta_service import TechnicalAnalysisService
 
@@ -10,6 +11,109 @@ logger = logging.getLogger(__name__)
 
 class CryptoRepository:
     """Xử lý các thao tác database cho Crypto."""
+
+    @staticmethod
+    def record_signal(db: Session, symbol: str, signal_type: str, score: int, entry_price: float):
+        """Lưu một tín hiệu mới để theo dõi hiệu quả (Bỏ cooldown để test)."""
+        try:
+            new_signal = TradingSignal(
+                symbol=symbol,
+                signal_type=signal_type,
+                score=score,
+                entry_price=entry_price,
+                status="PENDING",
+                timestamp=datetime.utcnow()
+            )
+            db.add(new_signal)
+            db.commit()
+            db.refresh(new_signal)
+            logger.info(f"✅ Đã ghi nhận tín hiệu {signal_type} cho {symbol} tại giá {entry_price}")
+            return new_signal
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Lỗi khi lưu TradingSignal: {e}")
+            return None
+
+    @staticmethod
+    def validate_signals(db: Session):
+        """Kiểm tra kết quả các tín hiệu sau 1 giờ."""
+        from .crypto_scraper import CryptoScraperService
+        
+        # Lấy các tín hiệu PENDING đã đủ thời gian chờ (ít nhất 1 phút) để giá kịp biến động
+        threshold = datetime.utcnow() - timedelta(minutes=CryptoConfig.SIGNAL_VALIDATE_THRESHOLD_MINUTES)
+        pending_signals = db.query(TradingSignal).filter(
+            TradingSignal.status == "PENDING",
+            TradingSignal.timestamp <= threshold
+        ).all()
+
+        if not pending_signals:
+            return 0
+
+        # Lấy giá hiện tại từ OKX
+        current_data = CryptoScraperService.get_prices()
+        price_map = {item["instId"]: float(item["last"]) for item in current_data}
+
+        count = 0
+        for signal in pending_signals:
+            curr_price = price_map.get(signal.symbol)
+            if not curr_price:
+                continue
+            
+            signal.exit_price = curr_price
+            signal.status = "COMPLETED"
+            signal.closed_at = datetime.utcnow()
+            
+            # Tính toán kết quả
+            if signal.signal_type == "BUY":
+                signal.result = "WIN" if curr_price > signal.entry_price else "LOSS"
+            else: # SELL
+                signal.result = "WIN" if curr_price < signal.entry_price else "LOSS"
+            
+            count += 1
+        
+        db.commit()
+        return count
+
+    @staticmethod
+    def get_accuracy_report(db: Session):
+        """Lấy báo cáo tỷ lệ chính xác."""
+        total = db.query(TradingSignal).filter(TradingSignal.status == "COMPLETED").count()
+        if total == 0:
+            return "Chưa có đủ dữ liệu đối soát tín hiệu."
+        
+        wins = db.query(TradingSignal).filter(
+            TradingSignal.status == "COMPLETED",
+            TradingSignal.result == "WIN"
+        ).count()
+        
+        win_rate = (wins / total) * 100
+        
+        # Thống kê theo tuần
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        total_7d = db.query(TradingSignal).filter(
+            TradingSignal.status == "COMPLETED",
+            TradingSignal.timestamp >= week_ago
+        ).count()
+        
+        wins_7d = db.query(TradingSignal).filter(
+            TradingSignal.status == "COMPLETED",
+            TradingSignal.result == "WIN",
+            TradingSignal.timestamp >= week_ago
+        ).count()
+        
+        win_rate_7d = (wins_7d / total_7d * 100) if total_7d > 0 else 0
+
+        report = (
+            f"📊 <b>THỐNG KÊ ĐỘ CHÍNH XÁC</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🏆 Tổng Win Rate: <b>{win_rate:.1f}%</b>\n"
+            f"📈 Tổng số kèo: {total} ({wins} Thắng)\n\n"
+            f"📅 Trong 7 ngày qua:\n"
+            f"┗ Win Rate: <b>{win_rate_7d:.1f}%</b>\n"
+            f"┗ Số kèo: {total_7d}\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        return report
 
     @staticmethod
     def save_price(db: Session, symbol: str, price: float, timeframe: str = "1m", timestamp: datetime = None, 
@@ -163,14 +267,23 @@ class CryptoRepository:
 
         # --- Kết luận dựa trên điểm ---
         status = "⚪ TRUNG LẬP"
+        signal_type = None
+
         if score >= 4:
             status = "🔥 MUA MẠNH"
+            signal_type = "BUY"
         elif score >= 2:
             status = "🟢 MUA"
+            signal_type = "BUY"
         elif score <= -4:
             status = "💀 BÁN MẠNH"
+            signal_type = "SELL"
         elif score <= -2:
             status = "🔴 BÁN"
+            signal_type = "SELL"
+
+        if signal_type:
+            CryptoRepository.record_signal(db, symbol, signal_type, score, current_price)
 
         reasons_text = f" | {', '.join(reasons[:2])}" if reasons else ""
         return f"<b>{status}</b> [Điểm: {score:+} {reasons_text}]"
