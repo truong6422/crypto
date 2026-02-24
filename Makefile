@@ -37,7 +37,7 @@ run-bot:
 
 run-backend:
 	@echo "🚀 Đang khởi động Backend..."
-	@cd apps/backend && ./venv/bin/python3 -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8001
+	@cd apps/backend && ./venv/bin/python3 -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8005
 
 run-worker:
 	@echo "🚀 Đang khởi động Celery Worker (Lite Mode)..."
