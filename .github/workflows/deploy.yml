@@ -124,8 +124,8 @@ jobs:
             echo "⏳ Đợi 40 giây..."
             sleep 40
             
-            echo "🤖 6. Khởi động Celery & Bot..."
-            docker compose up -d celery_worker telegram_bot celery_beat
+            echo "🤖 6. Khởi động Celery & Bot & Flower..."
+            docker compose up -d celery_worker telegram_bot celery_beat flower
             
             echo "🚀 DEPLOY HOÀN TẤT!"
             df -h
