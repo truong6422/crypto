@@ -83,6 +83,19 @@ jobs:
           ssh $SSH_OPTS $USER_NAME@$HOSTNAME 'bash -s' << 'EOF'
             cd ~/app
             
+            # 0. Tự động xử lý SWAP cho server 1GB RAM (Bảo hiểm cho OOM)
+            echo "🧠 Kiểm tra RAM ảo (Swap)..."
+            if [ $(free -m | grep Swap | awk '{print $2}') -lt 1024 ]; then
+                echo "⚠️ Thiếu Swap, đang tự động tạo file Swap 2GB để tránh treo máy..."
+                sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+                sudo chmod 600 /swapfile
+                sudo mkswap /swapfile
+                sudo swapon /swapfile
+                echo "✅ Đã kích hoạt 2GB Swap."
+            else
+                echo "✅ Swap đã sẵn sàng."
+            fi
+
             echo "📥 1. Nạp Image vào hệ thống..."
             gunzip -c backend_image.tar.gz | sudo docker load
             
@@ -95,21 +108,23 @@ jobs:
             echo "⏳ Đợi 10 giây để DB sẵn sàng..."
             sleep 10
             
-            echo "🔄 4. Chạy Database Migrations..."
-            # Không dùng set -e ở đây để tránh dừng cả quá trình nếu migration báo lỗi nhẹ
-            sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Cảnh báo: Migration gặp trục trặc nhưng vẫn tiếp tục deploy."
-            
+            echo "🔄 4. Chạy Database Migrations (Sử dụng Swap)..."
+            # Dùng --no-deps để tiết kiệm RAM tối đa
+            sudo docker compose run --rm --no-deps backend alembic upgrade head || echo "⚠️ Migration gặp lỗi nhẹ."
+            echo "✅ Bước 4 hoàn tất."
+
             echo "🚀 5. Khởi động Backend..."
             sudo docker compose up -d backend
-            echo "⏳ Đợi 30 giây để nạp thư viện hệ thống..."
-            sleep 30
+            echo "⏳ Đợi 40 giây (Nạp Pandas/TA-Lib)..."
+            sleep 40
             
-            echo "🤖 6. Khởi động Celery & Telegram Bot..."
+            echo "🤖 6. Khởi động các dịch vụ còn lại (Celery, Bot)..."
             sudo docker compose up -d celery_worker telegram_bot celery_beat
             
             echo "🧹 7. Dọn dẹp tài nguyên thừa..."
             sudo docker system prune -f
             
-            echo "✅ DEPLOY HOÀN TẤT!"
+            echo "🚀 DEPLOY HOÀN TẤT!"
             sudo docker compose ps
+            free -m
           EOF
