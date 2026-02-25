@@ -118,8 +118,8 @@ class CryptoAssets:
 
 class CryptoConfig:
     """Các thiết lập cấu hình cho hệ thống theo dõi Crypto."""
-    # Tần suất crawl giá (giây) - 1 phút = 60 giây
-    CRAWL_INTERVAL_SECONDS = 60.0
+    # Tần suất crawl giá (giây) - 5 phút (Chuẩn Production)
+    CRAWL_INTERVAL_SECONDS = 300.0
     
     # Thời gian giữ lại dữ liệu (giờ) - 168h = 7 ngày
     DATA_RETENTION_HOURS = 168
@@ -128,11 +128,15 @@ class CryptoConfig:
     CLEANUP_HOUR = 0
     CLEANUP_MINUTE = 0
     
-    # Tần suất gửi báo cáo định kỳ (giây) - 10 phút = 600 giây
-    REPORT_INTERVAL_SECONDS = 600.0
-    PREDICTION_INTERVAL_SECONDS = 60.0
-    VALIDATE_INTERVAL_SECONDS = 60.0
-    SIGNAL_VALIDATE_THRESHOLD_MINUTES = 1
+    # Tần suất gửi báo cáo định kỳ (giây) - 1 giờ (Tránh spam Telegram)
+    REPORT_INTERVAL_SECONDS = 3600.0
+    
+    # Tần suất thực hiện dự đoán và validate (giây)
+    PREDICTION_INTERVAL_SECONDS = 300.0
+    VALIDATE_INTERVAL_SECONDS = 300.0
+    
+    # Khoảng thời gian để kiểm tra xem tín hiệu có khớp không (phút)
+    SIGNAL_VALIDATE_THRESHOLD_MINUTES = 5
     
     # Ngưỡng biến động giá để cảnh báo (%)
     VOLATILITY_THRESHOLD_PCT = 1.0
