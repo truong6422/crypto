@@ -60,7 +60,16 @@ jobs:
           echo "BACKEND_IMAGE=crypto-backend:latest" >> .env
           echo "PYTHONPATH=/app" >> .env
 
-      - name: 🚀 Final Deploy via Docker Load
+      - name: � Debug Environment & Artifacts
+        run: |
+          echo "📂 Kiểm tra file build artifacts:"
+          ls -lh backend_image.tar.gz
+          echo "🔑 Kiểm tra độ dài Secrets (đảm bảo không bị trống):"
+          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then echo "❌ EC2_SSH_KEY is EMPTY"; else echo "✅ EC2_SSH_KEY is set"; fi
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then echo "❌ EC2_HOST is EMPTY"; else echo "✅ EC2_HOST is set"; fi
+          if [ -z "${{ secrets.EC2_USER }}" ]; then echo "❌ EC2_USER is EMPTY"; else echo "✅ EC2_USER is set"; fi
+
+      - name: �🚀 Final Deploy via Docker Load
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOSTNAME: ${{ secrets.EC2_HOST }}
@@ -70,19 +79,21 @@ jobs:
           echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          echo "📡 Kết nối và chuẩn bị thư mục..."
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME "mkdir -p ~/app"
-
-          echo "📤 Đang đẩy Image và cấu hình lên Server (Sử dụng SCP)..."
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa backend_image.tar.gz .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
+          # Cấu hình SSH tối ưu cho network kém và debug sâu
+          SSH_OPTS="-vv -o StrictHostKeyChecking=no -o ConnectTimeout=60 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -i ~/.ssh/id_rsa"
           
-          echo "⚙️ Bắt đầu thực thi lệnh trên Server..."
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $USER_NAME@$HOSTNAME 'bash -s' << 'EOF'
+          echo "📡 [DEBUG] Đang thử kết nối tới $HOSTNAME..."
+          ssh $SSH_OPTS $USER_NAME@$HOSTNAME "mkdir -p ~/app && echo '✅ Server phản hồi: Đã sẵn sàng thư mục app'"
+
+          echo "📤 [DEBUG] Đang đẩy file lên Server (SCP -vv)..."
+          scp $SSH_OPTS backend_image.tar.gz .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
+          
+          echo "⚙️ [DEBUG] Đang thực thi lệnh nạp Image trên Server..."
+          ssh $SSH_OPTS $USER_NAME@$HOSTNAME 'bash -s' << 'EOF'
             set -e
             cd ~/app
             
             echo "📥 1. Nạp Image vào hệ thống (Docker Load)..."
-            # Giải nén và nạp image tuần tự để không tốn RAM
             gunzip -c backend_image.tar.gz | sudo docker load
             
             echo "🧹 2. Dọn dẹp: Tắt hệ thống cũ & Xóa file nén..."
