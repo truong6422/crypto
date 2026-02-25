@@ -78,7 +78,11 @@ jobs:
 
           echo "📤 Đang đẩy Image và cấu hình lên Server..."
           scp $SSH_OPTS backend_image.tar.gz .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
-          
+          echo "⚙️ Đang thực thi lệnh triển khai trên Server..."
+          ssh $SSH_OPTS $USER_NAME@$HOSTNAME 'bash -s' << 'EOF'
+            set -e
+            cd ~/app
+            
             # 0. Tự động xử lý SWAP mạnh tay (4GB dự phòng cho server yếu)
             echo "🧠 Cấu hình bộ nhớ ảo (Swap 4GB)..."
             if [ $(free -m | grep Swap | awk '{print $2}') -lt 2000 ]; then
