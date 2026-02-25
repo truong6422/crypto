@@ -6,6 +6,7 @@ from src.database import get_session_local
 from src.services.crypto_scraper import CryptoScraperService
 from src.services.crypto_repository import CryptoRepository
 from src.services.telegram_bot import TelegramService
+from src.services.subscription_service import SubscriptionService
 from src.constants import CryptoAssets, CryptoConfig
 from src.models import CryptoHistory, CryptoDaily
 
@@ -84,7 +85,11 @@ def crawl_and_save_prices():
     db = get_session_local()()
     
     try:
-        for symbol in CryptoAssets.DEFAULT_IDS:
+        # Lấy danh sách mặc định + danh sách người dùng đăng ký
+        subscribed_symbols = SubscriptionService.get_all_subscribed_symbols(db)
+        symbols_to_crawl = list(set(CryptoAssets.DEFAULT_IDS + subscribed_symbols))
+        
+        for symbol in symbols_to_crawl:
             # Lấy nến 1m gần nhất từ OKX
             candles = CryptoScraperService.get_historical_candles(symbol, bar="1m", limit=2)
             if not candles:
@@ -103,7 +108,18 @@ def crawl_and_save_prices():
                 if abs(diff_pct) >= 1.0:
                     alert_msg = f"<b>⚠️ BIẾN ĐỘNG MẠNH: {symbol}</b>\n"
                     alert_msg += f"💰 Giá: ${current_price:,.2f} ({diff_pct:+.2f}%)\n"
+                    
+                    # Gửi cho admin mặc định (nếu có)
                     TelegramService.send_message(alert_msg)
+                    
+                    # Gửi cho những người đã đăng ký mã này
+                    subs = db.query(UserSubscription).filter(
+                        UserSubscription.symbol == symbol, 
+                        UserSubscription.is_active == True
+                    ).all()
+                    for sub in subs:
+                        if sub.chat_id != settings.TELEGRAM_CHAT_ID: # Tránh gửi trùng nếu chat_id là admin
+                            TelegramService.send_message(alert_msg, chat_id=sub.chat_id)
 
             # 2. Lưu nến 1m với đầy đủ OHLCV
             CryptoRepository.save_price(

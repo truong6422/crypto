@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from ..services.crypto_scraper import CryptoScraperService
 from ..services.telegram_bot import TelegramService
 from ..services.crypto_repository import CryptoRepository
+from ..services.subscription_service import SubscriptionService
 from ..database import get_db
 from ..config import settings
 from ..constants import CryptoConfig
@@ -50,3 +51,49 @@ async def get_accuracy(db: Session = Depends(get_db)):
     """Lấy báo cáo độ chính xác của các dự đoán."""
     report = CryptoRepository.get_accuracy_report(db)
     return {"report": report}
+
+
+@router.get("/search")
+async def search_coins(q: str):
+    """Tìm kiếm mã coin trên OKX."""
+    results = CryptoScraperService.search_instruments(q)
+    return results[:10]  # Giới hạn 10 kết quả
+
+
+@router.post("/subscribe")
+async def subscribe(chat_id: str, symbol: str, db: Session = Depends(get_db)):
+    """Đăng ký nhận thông báo cho 1 mã coin."""
+    # Kiểm tra mã có tồn tại trên OKX không
+    instruments = CryptoScraperService.get_all_instruments()
+    valid_symbols = [inst["instId"] for inst in instruments]
+    
+    # Chuẩn hóa
+    if not symbol.endswith("-USDT") and "-" not in symbol:
+        symbol = f"{symbol.upper()}-USDT"
+        
+    if symbol not in valid_symbols:
+        raise HTTPException(status_code=400, detail=f"Mã {symbol} không hợp lệ trên OKX SPOT.")
+        
+    sub = SubscriptionService.subscribe(db, chat_id, symbol)
+    
+    # Trigger backfill dữ liệu lịch sử ngay lập tức để có thể phân tích
+    from .tasks import backfill_historical_data
+    backfill_historical_data.delay(symbol)
+    
+    return {"message": f"Đã đăng ký theo dõi {symbol}", "sub_id": sub.id}
+
+
+@router.post("/unsubscribe")
+async def unsubscribe(chat_id: str, symbol: str, db: Session = Depends(get_db)):
+    """Hủy đăng ký nhận thông báo."""
+    success = SubscriptionService.unsubscribe(db, chat_id, symbol)
+    if not success:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thông tin đăng ký.")
+    return {"message": f"Đã hủy đăng ký theo dõi {symbol}"}
+
+
+@router.get("/subscriptions")
+async def list_subscriptions(chat_id: str, db: Session = Depends(get_db)):
+    """Lấy danh sách đăng ký của một chat_id."""
+    subs = SubscriptionService.get_user_subscriptions(db, chat_id)
+    return [s.symbol for s in subs]

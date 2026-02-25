@@ -165,3 +165,17 @@ class TradingSignal(Base):
 
     def __repr__(self):
         return f"<TradingSignal(symbol='{self.symbol}', type='{self.signal_type}', result={self.result})>"
+
+
+class UserSubscription(Base):
+    """Đăng ký nhận thông báo biến động cho các mã Crypto."""
+    __tablename__ = "user_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(String(50), index=True, nullable=False) # ID chat Telegram
+    symbol = Column(String(50), index=True, nullable=False) # Mã coin (ví dụ BTC-USDT)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<UserSubscription(chat_id='{self.chat_id}', symbol='{self.symbol}')>"

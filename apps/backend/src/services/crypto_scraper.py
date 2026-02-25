@@ -38,6 +38,30 @@ class CryptoScraperService:
             return []
 
     @classmethod
+    def get_all_instruments(cls) -> List[Dict[str, Any]]:
+        """Lấy danh sách tất cả các mã giao dịch SPOT từ OKX."""
+        url = f"{cls.BASE_URL}/public/instruments"
+        params = {"instType": "SPOT"}
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            return response.json().get("data", [])
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy danh sách instruments từ OKX: {e}")
+            return []
+
+    @classmethod
+    def search_instruments(cls, query: str) -> List[Dict[str, Any]]:
+        """Tìm kiếm các mã giao dịch theo query."""
+        instruments = cls.get_all_instruments()
+        query = query.upper()
+        # Tìm kiếm theo baseCcy (ví dụ BTC) hoặc instId (ví dụ BTC-USDT)
+        return [
+            inst for inst in instruments 
+            if query in inst.get("instId", "") or query in inst.get("baseCcy", "")
+        ]
+
+    @classmethod
     def get_historical_candles(cls, symbol: str, bar: str = "1m", limit: int = 100) -> List[Dict[str, Any]]:
         """
         Lấy dữ liệu nến lịch sử từ OKX.
