@@ -129,7 +129,7 @@ class CryptoConfig:
     CLEANUP_MINUTE = 0
     
     # Tần suất gửi báo cáo định kỳ (giây) - 10 phút
-    REPORT_INTERVAL_SECONDS = 600.0
+    REPORT_INTERVAL_SECONDS = 600
     
     # Tần suất thực hiện dự đoán và validate (giây)
     PREDICTION_INTERVAL_SECONDS = 300.0
