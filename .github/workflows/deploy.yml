@@ -79,52 +79,48 @@ jobs:
           echo "📤 Đang đẩy Image và cấu hình lên Server..."
           scp $SSH_OPTS backend_image.tar.gz .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
-          echo "⚙️ Đang thực thi lệnh triển khai trên Server..."
-          ssh $SSH_OPTS $USER_NAME@$HOSTNAME 'bash -s' << 'EOF'
-            cd ~/app
-            
-            # 0. Tự động xử lý SWAP cho server 1GB RAM (Bảo hiểm cho OOM)
-            echo "🧠 Kiểm tra RAM ảo (Swap)..."
-            if [ $(free -m | grep Swap | awk '{print $2}') -lt 1024 ]; then
-                echo "⚠️ Thiếu Swap, đang tự động tạo file Swap 2GB để tránh treo máy..."
-                sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+            # 0. Tự động xử lý SWAP mạnh tay (4GB dự phòng cho server yếu)
+            echo "🧠 Cấu hình bộ nhớ ảo (Swap 4GB)..."
+            if [ $(free -m | grep Swap | awk '{print $2}') -lt 2000 ]; then
+                sudo swapoff -a || true
+                sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
                 sudo chmod 600 /swapfile
                 sudo mkswap /swapfile
                 sudo swapon /swapfile
-                echo "✅ Đã kích hoạt 2GB Swap."
-            else
-                echo "✅ Swap đã sẵn sàng."
+                echo "✅ Đã kích hoạt 4GB Swap."
             fi
 
             echo "📥 1. Nạp Image vào hệ thống..."
             gunzip -c backend_image.tar.gz | sudo docker load
             
-            echo "🧹 2. Dọn dẹp hệ thống cũ..."
+            echo "🧹 2. Dọn dẹp & Giải phóng RAM cực hạn..."
             sudo docker compose down --remove-orphans || true
             rm backend_image.tar.gz
+            # Xóa cache RAM (rất quan trọng sau khi load image nặng)
+            sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
             
             echo "🗄️ 3. Khởi động Database & Redis..."
             sudo docker compose up -d db redis
-            echo "⏳ Đợi 10 giây để DB sẵn sàng..."
-            sleep 10
+            echo "⏳ Đợi DB sẵn sàng..."
+            sleep 15
             
-            echo "🔄 4. Chạy Database Migrations (Sử dụng Swap)..."
-            # Dùng --no-deps để tiết kiệm RAM tối đa
-            sudo docker compose run --rm --no-deps backend alembic upgrade head || echo "⚠️ Migration gặp lỗi nhẹ."
+            echo "🔄 4. Chạy Database Migrations (Giới hạn RAM)..."
+            # -T: Tắt TTY, --memory: Giới hạn RAM container migration không làm treo host
+            sudo docker compose run -T --rm --no-deps --memory="700m" backend alembic upgrade head || echo "⚠️ Migration có cảnh báo."
             echo "✅ Bước 4 hoàn tất."
 
             echo "🚀 5. Khởi động Backend..."
             sudo docker compose up -d backend
-            echo "⏳ Đợi 40 giây (Nạp Pandas/TA-Lib)..."
+            echo "⏳ Đợi 40 giây (Nạp Pandas)..."
             sleep 40
             
-            echo "🤖 6. Khởi động các dịch vụ còn lại (Celery, Bot)..."
+            echo "🤖 6. Khởi động Celery & Bot..."
             sudo docker compose up -d celery_worker telegram_bot celery_beat
             
             echo "🧹 7. Dọn dẹp tài nguyên thừa..."
             sudo docker system prune -f
             
             echo "🚀 DEPLOY HOÀN TẤT!"
-            sudo docker compose ps
             free -m
+            sudo docker compose ps
           EOF
