@@ -128,8 +128,8 @@ class CryptoConfig:
     CLEANUP_HOUR = 0
     CLEANUP_MINUTE = 0
     
-    # Tần suất gửi báo cáo định kỳ (giây) - 1 giờ (Tránh spam Telegram)
-    REPORT_INTERVAL_SECONDS = 3600.0
+    # Tần suất gửi báo cáo định kỳ (giây) - 10 phút
+    REPORT_INTERVAL_SECONDS = 600.0
     
     # Tần suất thực hiện dự đoán và validate (giây)
     PREDICTION_INTERVAL_SECONDS = 300.0

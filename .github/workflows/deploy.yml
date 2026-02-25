@@ -85,12 +85,12 @@ jobs:
             echo "📊 [DEBUG] Kiểm tra dung lượng ổ cứng trước khi bắt đầu:"
             df -h
             
-            # 0. Giải phóng dung lượng TRƯỚC khi nạp Image mới (Sửa lỗi No space left on device)
+            # 0. Giải phóng dung lượng TRƯỚC khi nạp Image mới
             echo "🧹 0. Dọn dẹp cực hạn để lấy chỗ trống..."
-            sudo docker compose down --remove-orphans || true
-            sudo docker system prune -a -f
+            docker compose down --remove-orphans || true
+            docker system prune -a -f
             
-            # 1. Cấu hình bộ nhớ ảo (Swap - Giảm xuống 2GB để tiết kiệm ổ cứng)
+            # 1. Cấu hình bộ nhớ ảo (Swap 2GB)
             echo "🧠 Cấu hình bộ nhớ ảo (Swap 2GB)..."
             if [ $(free -m | grep Swap | awk '{print $2}') -lt 1000 ]; then
                 sudo swapoff -a || true
@@ -104,30 +104,30 @@ jobs:
 
             echo "📥 1. Nạp Image vào hệ thống..."
             # Xóa cache RAM để nạp nhanh hơn
-            sync && echo 3 | sudo tee /proc/sys/sys/vm/drop_caches
-            gunzip -c backend_image.tar.gz | sudo docker load
+            sync && echo 3 | tee /proc/sys/vm/drop_caches || true
+            gunzip -c backend_image.tar.gz | docker load
             
             echo "🧹 2. Xóa file tạm..."
             rm backend_image.tar.gz
             
             echo "🗄️ 3. Khởi động Database & Redis..."
-            sudo docker compose up -d db redis
+            docker compose up -d db redis
             echo "⏳ Đợi DB sẵn sàng..."
             sleep 15
             
             echo "🔄 4. Chạy Database Migrations (Giới hạn RAM)..."
-            sudo docker compose run -T --rm --no-deps --memory="700m" backend alembic upgrade head || echo "⚠️ Migration có cảnh báo."
+            docker compose run -T --rm --no-deps --memory="700m" backend alembic upgrade head || echo "⚠️ Migration có cảnh báo."
             echo "✅ Bước 4 hoàn tất."
 
             echo "🚀 5. Khởi động Backend..."
-            sudo docker compose up -d backend
+            docker compose up -d backend
             echo "⏳ Đợi 40 giây..."
             sleep 40
             
             echo "🤖 6. Khởi động Celery & Bot..."
-            sudo docker compose up -d celery_worker telegram_bot celery_beat
+            docker compose up -d celery_worker telegram_bot celery_beat
             
             echo "🚀 DEPLOY HOÀN TẤT!"
             df -h
-            sudo docker compose ps
+            docker compose ps
           EOF
