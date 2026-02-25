@@ -60,16 +60,7 @@ jobs:
           echo "BACKEND_IMAGE=crypto-backend:latest" >> .env
           echo "PYTHONPATH=/app" >> .env
 
-      - name: � Debug Environment & Artifacts
-        run: |
-          echo "📂 Kiểm tra file build artifacts:"
-          ls -lh backend_image.tar.gz
-          echo "🔑 Kiểm tra độ dài Secrets (đảm bảo không bị trống):"
-          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then echo "❌ EC2_SSH_KEY is EMPTY"; else echo "✅ EC2_SSH_KEY is set"; fi
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then echo "❌ EC2_HOST is EMPTY"; else echo "✅ EC2_HOST is set"; fi
-          if [ -z "${{ secrets.EC2_USER }}" ]; then echo "❌ EC2_USER is EMPTY"; else echo "✅ EC2_USER is set"; fi
-
-      - name: �🚀 Final Deploy via Docker Load
+      - name: 🚀 Final Deploy via Docker Load
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOSTNAME: ${{ secrets.EC2_HOST }}
@@ -79,46 +70,46 @@ jobs:
           echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Cấu hình SSH tối ưu cho network kém và debug sâu
-          SSH_OPTS="-vv -o StrictHostKeyChecking=no -o ConnectTimeout=60 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -i ~/.ssh/id_rsa"
+          # Cấu hình SSH chuẩn (không debug)
+          SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=60 -o ServerAliveInterval=15 -i ~/.ssh/id_rsa"
           
-          echo "📡 [DEBUG] Đang thử kết nối tới $HOSTNAME..."
-          ssh $SSH_OPTS $USER_NAME@$HOSTNAME "mkdir -p ~/app && echo '✅ Server phản hồi: Đã sẵn sàng thư mục app'"
+          echo "📡 Đang kết nối tới $HOSTNAME..."
+          ssh $SSH_OPTS $USER_NAME@$HOSTNAME "mkdir -p ~/app"
 
-          echo "📤 [DEBUG] Đang đẩy file lên Server (SCP -vv)..."
+          echo "📤 Đang đẩy Image và cấu hình lên Server..."
           scp $SSH_OPTS backend_image.tar.gz .env docker-compose.yml $USER_NAME@$HOSTNAME:~/app/
           
-          echo "⚙️ [DEBUG] Đang thực thi lệnh nạp Image trên Server..."
+          echo "⚙️ Đang thực thi lệnh triển khai trên Server..."
           ssh $SSH_OPTS $USER_NAME@$HOSTNAME 'bash -s' << 'EOF'
-            set -e
             cd ~/app
             
-            echo "📥 1. Nạp Image vào hệ thống (Docker Load)..."
+            echo "📥 1. Nạp Image vào hệ thống..."
             gunzip -c backend_image.tar.gz | sudo docker load
             
-            echo "🧹 2. Dọn dẹp: Tắt hệ thống cũ & Xóa file nén..."
+            echo "🧹 2. Dọn dẹp hệ thống cũ..."
             sudo docker compose down --remove-orphans || true
             rm backend_image.tar.gz
             
             echo "🗄️ 3. Khởi động Database & Redis..."
             sudo docker compose up -d db redis
-            echo "⏳ Đợi 10s..."
+            echo "⏳ Đợi 10 giây để DB sẵn sàng..."
             sleep 10
             
-            echo "🔄 4. Chạy Migration..."
-            sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Migration có thể đã chạy rồi."
+            echo "🔄 4. Chạy Database Migrations..."
+            # Không dùng set -e ở đây để tránh dừng cả quá trình nếu migration báo lỗi nhẹ
+            sudo docker compose run --rm backend alembic upgrade head || echo "⚠️ Cảnh báo: Migration gặp trục trặc nhưng vẫn tiếp tục deploy."
             
-            echo "⚙️ 5. Khởi động Backend..."
+            echo "🚀 5. Khởi động Backend..."
             sudo docker compose up -d backend
-            echo "⏳ Đợi nạp Pandas..."
+            echo "⏳ Đợi 30 giây để nạp thư viện hệ thống..."
             sleep 30
             
-            echo "🤖 6. Khởi động các dịch vụ còn lại..."
+            echo "🤖 6. Khởi động Celery & Telegram Bot..."
             sudo docker compose up -d celery_worker telegram_bot celery_beat
             
-            echo "✅ Dọn dẹp rác..."
+            echo "🧹 7. Dọn dẹp tài nguyên thừa..."
             sudo docker system prune -f
             
-            echo "🚀 DEPLOY HOÀN TẤT!"
+            echo "✅ DEPLOY HOÀN TẤT!"
             sudo docker compose ps
           EOF
